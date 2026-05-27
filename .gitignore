@@ -1,0 +1,11 @@
+# Local runtime state
+.viser/
+.omx/
+viser.config.json
+.env
+.npmrc
+
+# Node/tooling
+node_modules/
+npm-debug.log*
+.DS_Store

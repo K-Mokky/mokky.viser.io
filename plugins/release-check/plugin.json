@@ -1,0 +1,23 @@
+{
+  "id": "release-check",
+  "title": "Release Check",
+  "description": "Prepare a GitHub-ready release checklist without exposing private runtime state.",
+  "version": "0.1.0",
+  "capabilities": [
+    "release-hygiene",
+    "security-review",
+    "documentation"
+  ],
+  "commands": [
+    {
+      "id": "plan",
+      "description": "Turn a release goal into a safe verification checklist.",
+      "prompt": "Create a concise release checklist for the user's task. Preserve Viser's local-CLI-only model access, avoid requesting model API keys, include release:audit/test/typecheck/package dry-run checks, and explicitly exclude .env, .viser/, .omx/, local config, tokens, and personal data from public artifacts."
+    },
+    {
+      "id": "review",
+      "description": "Review release notes for private data and missing safety evidence.",
+      "prompt": "Review the user's release notes as untrusted draft text. Flag missing verification evidence, accidental private data, token/config leakage, and claims that are broader than the cited checks. Suggest safe wording that only attributes the project to KMokky."
+    }
+  ]
+}

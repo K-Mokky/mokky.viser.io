@@ -1,0 +1,57 @@
+name: Bug report
+description: Report a Viser bug without exposing private data.
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve Viser. Do not paste real `.env` contents,
+        `TELEGRAM_BOT_TOKEN`, `DISCORD_BOT_TOKEN`, provider env, API keys,
+        `.viser/`, `.omx/`, session/memory/job state, local filesystem paths,
+        personal handles, emails, chat IDs, channel IDs, or service logs.
+        Use fake credentials and generic examples only.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Use fake credentials and redact local paths.
+      placeholder: |
+        1. Run `node src/index.ts ...`
+        2. Observe ...
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - CLI/chat
+        - Local CLI provider
+        - Telegram bridge
+        - Discord bridge
+        - Prompt guard/security
+        - Approval-gated action
+        - Jobs/scheduler/service
+        - Release/privacy/docs
+        - Other
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Safety checklist
+      options:
+        - label: I removed real tokens, `.env` contents, private runtime state, personal handles, emails, IDs, and local paths.
+          required: true
+        - label: I did not request or add GPT/Gemini/Claude model API key usage for Viser core routes.
+          required: true
+        - label: If this is security-sensitive, I will use private vulnerability reporting instead of a public issue.
+          required: true

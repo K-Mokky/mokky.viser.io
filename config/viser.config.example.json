@@ -1,0 +1,169 @@
+{
+  "assistant": {
+    "name": "Viser",
+    "defaultProvider": "codex",
+    "systemPrompt": "You are Viser, a local-first CLI assistant created by KMokky. Be concise, practical, and ask before destructive actions.",
+    "historyLimit": 12,
+    "maxInputChars": 12000,
+    "workdir": ".",
+    "fallbackProviders": [
+      "gemini",
+      "claude",
+      "gpt"
+    ]
+  },
+  "storage": {
+    "dir": ".viser"
+  },
+  "memory": {
+    "enabled": true,
+    "dir": ".viser/memory",
+    "promptLimit": 12
+  },
+  "skills": {
+    "enabled": true,
+    "dirs": [
+      "skills",
+      ".viser/skills"
+    ],
+    "promptLimit": 8
+  },
+  "plugins": {
+    "enabled": true,
+    "dirs": [
+      "plugins",
+      ".viser/plugins"
+    ],
+    "promptLimit": 8
+  },
+  "tools": {
+    "enabled": true,
+    "allowedReadRoots": [
+      "."
+    ],
+    "maxReadBytes": 20000,
+    "shell": {
+      "enabled": true,
+      "allowedCommands": [
+        "pwd",
+        "ls",
+        "cat",
+        "sed",
+        "grep",
+        "rg",
+        "find",
+        "wc",
+        "git"
+      ],
+      "timeoutMs": 30000
+    }
+  },
+  "scheduler": {
+    "enabled": true,
+    "dir": ".viser/scheduler",
+    "tickMs": 15000
+  },
+  "jobs": {
+    "enabled": true,
+    "dir": ".viser/jobs",
+    "tickMs": 15000,
+    "concurrency": 1
+  },
+  "access": {
+    "enabled": true,
+    "dir": ".viser/access",
+    "defaultPolicy": "pairing",
+    "pairingCodeTtlMs": 600000
+  },
+  "actions": {
+    "enabled": true,
+    "dir": ".viser/actions",
+    "allowedWriteRoots": [
+      "."
+    ],
+    "maxWriteBytes": 50000,
+    "createBackups": true
+  },
+  "connectors": {
+    "telegram": {
+      "enabled": false,
+      "botTokenEnv": "TELEGRAM_BOT_TOKEN",
+      "allowedChatIds": [],
+      "defaultChatIds": [],
+      "maxMessagesPerMinute": 20,
+      "maxInputChars": 4000
+    },
+    "discord": {
+      "enabled": false,
+      "botTokenEnv": "DISCORD_BOT_TOKEN",
+      "prefix": "!viser",
+      "allowedChannelIds": [],
+      "defaultChannelIds": [],
+      "maxMessagesPerMinute": 20,
+      "maxInputChars": 4000
+    }
+  },
+  "providers": {
+    "codex": {
+      "id": "codex",
+      "label": "OpenAI Codex CLI",
+      "command": "codex",
+      "args": [
+        "exec",
+        "--skip-git-repo-check",
+        "--sandbox",
+        "read-only",
+        "-"
+      ],
+      "promptMode": "stdin",
+      "timeoutMs": 600000,
+      "loginHint": "Run `codex login` once in your terminal, then use this provider."
+    },
+    "gpt": {
+      "id": "gpt",
+      "label": "GPT through Codex CLI",
+      "command": "codex",
+      "args": [
+        "exec",
+        "--skip-git-repo-check",
+        "--sandbox",
+        "read-only",
+        "-"
+      ],
+      "promptMode": "stdin",
+      "timeoutMs": 600000,
+      "loginHint": "Run `codex login`; this alias routes GPT-style requests through the logged-in Codex CLI."
+    },
+    "gemini": {
+      "id": "gemini",
+      "label": "Gemini CLI",
+      "command": "gemini",
+      "args": [
+        "--prompt",
+        "{prompt}",
+        "--approval-mode",
+        "plan"
+      ],
+      "promptMode": "template",
+      "timeoutMs": 600000,
+      "loginHint": "Run `gemini` interactively once and complete the browser login."
+    },
+    "claude": {
+      "id": "claude",
+      "label": "Claude Code CLI",
+      "command": "claude",
+      "args": [
+        "-p",
+        "{prompt}"
+      ],
+      "promptMode": "template",
+      "timeoutMs": 600000,
+      "loginHint": "Install Claude Code, then run `claude` once and complete account login."
+    }
+  },
+  "webDashboard": {
+    "enabled": false,
+    "host": "127.0.0.1",
+    "port": 8787
+  }
+}

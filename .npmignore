@@ -1,0 +1,13 @@
+# Runtime/private state must never be packed.
+.env
+.npmrc
+viser.config.json
+.viser/
+.omx/
+
+# Development-only files.
+test/
+node_modules/
+npm-debug.log*
+.DS_Store
+aimake.md
