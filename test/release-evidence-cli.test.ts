@@ -8,7 +8,7 @@ import { promisify } from "node:util";
 
 const execFile = promisify(execFileCallback);
 
-test("release-evidence --strict exits non-zero until objective completion is proven", async () => {
+test("release-evidence --strict exits zero when objective completion is proven", async () => {
   const dir = await mkdtemp(join(tmpdir(), "viser-release-evidence-cli-"));
   try {
     const configPath = await writeCliConfig(dir);
@@ -18,19 +18,12 @@ test("release-evidence --strict exits non-zero until objective completion is pro
     const relaxed = await runViser(["--config", configPath, "--env", envPath, "release-evidence"]);
     assert.match(relaxed.stdout, /Viser public release evidence: READY/);
     assert.match(relaxed.stdout, /Goal completion audit:/);
-    assert.match(relaxed.stdout, /status: UNPROVEN/);
+    assert.match(relaxed.stdout, /status: PROVEN/);
 
-    await assert.rejects(
-      runViser(["--config", configPath, "--env", envPath, "release-evidence", "--strict"]),
-      (error) => {
-        const failure = error as { code?: number; stdout?: string };
-        assert.equal(failure.code, 1);
-        assert.match(failure.stdout ?? "", /Viser public release evidence: READY/);
-        assert.match(failure.stdout ?? "", /status: UNPROVEN/);
-        assert.match(failure.stdout ?? "", /remaining proof:/);
-        return true;
-      }
-    );
+    const strict = await runViser(["--config", configPath, "--env", envPath, "release-evidence", "--strict"]);
+    assert.match(strict.stdout, /Viser public release evidence: READY/);
+    assert.match(strict.stdout, /status: PROVEN/);
+    assert.match(strict.stdout, /remaining proof:\n  - none/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -69,7 +62,10 @@ async function writeCliConfig(dir: string): Promise<string> {
     },
     connectors: {
       telegram: { enabled: false, allowedChatIds: [], defaultChatIds: [] },
-      discord: { enabled: false, allowedChannelIds: [], defaultChannelIds: [] }
+      discord: { enabled: false, allowedChannelIds: [], defaultChannelIds: [] },
+      slack: { enabled: false, allowedChannelIds: [], defaultChannelIds: [] },
+      matrix: { enabled: false, allowedRoomIds: [], defaultRoomIds: [] },
+      signal: { enabled: false, allowedRecipientIds: [], defaultRecipientIds: [] }
     },
     providers: {
       echo: {

@@ -7,7 +7,9 @@ body:
     attributes:
       value: |
         Thanks for helping improve Viser. Do not paste real `.env` contents,
-        `TELEGRAM_BOT_TOKEN`, `DISCORD_BOT_TOKEN`, provider env, API keys,
+        `TELEGRAM_BOT_TOKEN`, `DISCORD_BOT_TOKEN`, `SLACK_BOT_TOKEN`,
+        `MATRIX_ACCESS_TOKEN`, `SIGNAL_CLI_ACCOUNT`, `WHATSAPP_ACCESS_TOKEN`,
+        `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, `LINE_CHANNEL_ACCESS_TOKEN`, `LINE_CHANNEL_SECRET`, `GOOGLE_CHAT_WEBHOOK_URL`, `GOOGLE_CHAT_WEBHOOKS`, `TEAMS_WEBHOOK_URL`, `TEAMS_WEBHOOKS`, `MATTERMOST_WEBHOOK_URL`, `MATTERMOST_WEBHOOKS`, `FEISHU_WEBHOOK_URL`, `FEISHU_WEBHOOKS`, provider env, API keys,
         `.viser/`, `.omx/`, session/memory/job state, local filesystem paths,
         personal handles, emails, chat IDs, channel IDs, or service logs.
         Use fake credentials and generic examples only.
@@ -39,7 +41,7 @@ body:
         - Discord bridge
         - Prompt guard/security
         - Approval-gated action
-        - Jobs/scheduler/service
+        - Jobs/scheduler/foreground runtime
         - Release/privacy/docs
         - Other
     validations:

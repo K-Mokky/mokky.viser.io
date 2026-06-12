@@ -199,8 +199,8 @@ test("runQueuedJobs explains that a worker may have already processed empty queu
 
     assert.equal(report.ran, 0);
     assert.match(report.lines.join("\n"), /No pending jobs/);
-    assert.match(report.lines.join("\n"), /gateway\/service\/job-worker may have already processed queued jobs/);
-    assert.match(report.lines.join("\n"), /node src\/index.ts jobs done/);
+    assert.match(report.lines.join("\n"), /foreground gateway\/job-worker may have already processed queued jobs/);
+    assert.match(report.lines.join("\n"), /viser jobs done/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

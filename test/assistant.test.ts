@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { AssistantRuntime } from "../src/core/assistant.ts";
@@ -14,6 +14,7 @@ class EchoProvider implements ModelProvider {
 
   async generate(request: ProviderRequest): Promise<ProviderResponse> {
     this.prompts.push(request.prompt);
+    request.onOutputChunk?.({ stream: "stdout", text: `echo:${request.providerId}` });
     return { text: `echo:${request.providerId}`, providerId: request.providerId, elapsedMs: 5 };
   }
 }
@@ -68,6 +69,72 @@ test("AssistantRuntime sends normal messages to selected provider with memory an
   }
 });
 
+test("AssistantRuntime stores global personalization settings and injects them as untrusted preferences", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-test-persona-"));
+  try {
+    const provider = new EchoProvider();
+    const assistant = new AssistantRuntime(testConfig(dir), { echo: provider });
+
+    const saved = await assistant.handle("/persona tone 친절한 한국어 해요체", "test:persona", { source: "test" });
+    assert.match(saved, /Saved personalization setting 'ai\.tone'/);
+    assert.match(saved, /global across sessions/);
+    assert.equal(provider.prompts.length, 0);
+
+    assert.match(await assistant.handle("/persona personality 실용적이고 안전 우선", "test:persona", { source: "test" }), /ai\.personality/);
+    assert.match(await assistant.handle("/persona user-style 사용자는 짧은 문장을 선호", "test:persona", { source: "test" }), /user\.speechStyle/);
+    assert.match(await assistant.handle("/persona question-info 답변 전 필요한 전제를 확인", "test:persona", { source: "test" }), /question\.context/);
+    assert.match(await assistant.handle("/persona", "test:persona", { source: "test" }), /ai\.tone/);
+
+    const text = await assistant.handle("말투 반영 테스트", "test:persona", { source: "test" });
+    assert.match(text, /echo:echo/);
+    assert.equal(provider.prompts.length, 1);
+    assert.match(provider.prompts[0], /# Persistent personalization settings \(untrusted user-derived global variables\)/);
+    assert.match(provider.prompts[0], /<<<VISER_UNTRUSTED_BLOCK_START source="persistent_personalization_settings"/);
+    assert.match(provider.prompts[0], /ai\.tone: 친절한 한국어 해요체/);
+    assert.match(provider.prompts[0], /user\.speechStyle: 사용자는 짧은 문장을 선호/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("AssistantRuntime rejects sensitive-looking personalization values", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-test-persona-sensitive-"));
+  try {
+    const provider = new EchoProvider();
+    const assistant = new AssistantRuntime(testConfig(dir), { echo: provider });
+    const text = await assistant.handle("/persona set apiKey sk-should-not-be-stored-abcdefghijklmnopqrstuvwxyz", "test:persona-sensitive", { source: "test" });
+
+    assert.match(text, /Refusing to store sensitive-looking personalization keys/);
+    assert.equal(provider.prompts.length, 0);
+    assert.doesNotMatch(await assistant.handle("/persona", "test:persona-sensitive", { source: "test" }), /sk-should-not/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("AssistantRuntime can stream provider output without duplicating final text", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-test-stream-"));
+  try {
+    const provider = new EchoProvider();
+    const assistant = new AssistantRuntime(testConfig(dir), { echo: provider });
+    const chunks: string[] = [];
+    const text = await assistant.handle("hello streaming", "test:stream", {
+      source: "test",
+      suppressProviderText: true,
+      onProviderOutputChunk: (chunk) => {
+        if (chunk.stream === "stdout") chunks.push(chunk.text);
+      }
+    });
+
+    assert.equal(chunks.join(""), "echo:echo");
+    assert.doesNotMatch(text, /^echo:echo/);
+    assert.match(text, /Echo ·/);
+    assert.match(await assistant.handle("/session-search hello streaming", "test:stream", { source: "test" }), /hello streaming/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("AssistantRuntime blocks high-risk prompt injection before provider calls", async () => {
   const dir = await mkdtemp(join(tmpdir(), "viser-test-guard-block-"));
   try {
@@ -117,6 +184,121 @@ test("AssistantRuntime can inject a selected skill", async () => {
     assert.match(text, /echo:echo/);
     assert.match(provider.prompts[0], /# Selected skill \(untrusted local content\)\n<<<VISER_UNTRUSTED_BLOCK_START source="selected_skill"/);
     assert.match(provider.prompts[0], /# Brief/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("AssistantRuntime stages learned skills through approval-gated writes", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-test-learn-skill-"));
+  try {
+    const provider = new EchoProvider();
+    const assistant = new AssistantRuntime(testConfig(dir), { echo: provider });
+
+    const proposal = await assistant.handle(
+      "/learn-skill release-review | Review releases safely | 1. Run tests.\n2. Check public artifacts.",
+      "test:learn-skill",
+      { source: "test" }
+    );
+    const actionId = proposal.match(/\[([a-f0-9-]+)\]/)?.[1] ?? "";
+
+    assert.match(proposal, /Proposed learned skill/);
+    assert.match(proposal, /release-review/);
+    assert.match(proposal, /pending approval/);
+    assert.equal(provider.prompts.length, 0);
+
+    assert.match(await assistant.handle(`/approve ${actionId}`, "test:learn-skill", { source: "test" }), /Approved/);
+    const skill = await readFile(join(dir, "skills", "release-review", "SKILL.md"), "utf8");
+    assert.match(skill, /# Release Review/);
+    assert.match(skill, /description: Review releases safely/);
+    assert.match(skill, /1\. Run tests\.\n2\. Check public artifacts\./);
+    assert.match(await assistant.handle("/skills", "test:learn-skill", { source: "test" }), /release-review/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("AssistantRuntime reflects recent sessions into approval-gated learned skills", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-test-reflect-skill-"));
+  try {
+    const provider = new EchoProvider();
+    const assistant = new AssistantRuntime(testConfig(dir), { echo: provider });
+    await assistant.handle("solve a reusable release workflow", "test:reflect-skill", { source: "test" });
+
+    const proposal = await assistant.handle(
+      "/reflect-skill reflected-release | Distill release workflow | focus on verification steps",
+      "test:reflect-skill",
+      { source: "test" }
+    );
+    const actionId = proposal.match(/\[([a-f0-9-]+)\]/)?.[1] ?? "";
+
+    assert.match(proposal, /Proposed reflected skill/);
+    assert.match(proposal, /provider-assisted session reflection/);
+    assert.match(proposal, /proof: [a-f0-9-]+/);
+    assert.equal(provider.prompts.length, 2);
+    assert.match(provider.prompts[1], /# Viser skill reflection task/);
+    assert.match(provider.prompts[1], /skill_reflection_transcript/);
+    assert.match(provider.prompts[1], /solve a reusable release workflow/);
+
+    const pendingProofs = await assistant.handle("/skill-reflections", "test:reflect-skill", { source: "test" });
+    assert.match(pendingProofs, /Skill reflection proofs/);
+    assert.match(pendingProofs, /reflected-release \(pending\)/);
+    assert.match(pendingProofs, /transcript: \d+ message\(s\), hash=[a-f0-9]{16}/);
+
+    assert.match(await assistant.handle(`/approve ${actionId}`, "test:reflect-skill", { source: "test" }), /Approved/);
+    const approvedProofs = await assistant.handle("/skill-reflections", "test:reflect-skill", { source: "test" });
+    assert.match(approvedProofs, /reflected-release \(approved\)/);
+    const proofLog = await readFile(join(dir, "skills", "reflection-proofs.jsonl"), "utf8");
+    const proof = JSON.parse(proofLog.trim());
+    assert.equal(proof.skillId, "reflected-release");
+    assert.equal(proof.providerId, "echo");
+    assert.equal(proof.actionId, actionId);
+    assert.equal(proof.target, "reflected-release/SKILL.md");
+    assert.equal(typeof proof.transcriptHash, "string");
+    const skill = await readFile(join(dir, "skills", "reflected-release", "SKILL.md"), "utf8");
+    assert.match(skill, /# Reflected Release/);
+    assert.match(skill, /description: Distill release workflow/);
+    assert.match(skill, /echo:echo/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("AssistantRuntime curates recent sessions into approval-gated learned skills", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-test-curate-skill-"));
+  try {
+    const provider = new EchoProvider();
+    const assistant = new AssistantRuntime(testConfig(dir), { echo: provider });
+    await assistant.handle("debug a recurring connector failure and record the recovery pattern", "test:curate-skill", { source: "test" });
+
+    const proposal = await assistant.handle(
+      "/curate-skills focus on reusable recovery steps",
+      "test:curate-skill",
+      { source: "test" }
+    );
+    const actionId = proposal.match(/\[([a-f0-9-]+)\]/)?.[1] ?? "";
+
+    assert.match(proposal, /Proposed curated skill/);
+    assert.match(proposal, /automatic learning curator/);
+    assert.match(proposal, /proof: [a-f0-9-]+/);
+    assert.equal(provider.prompts.length, 2);
+    assert.match(provider.prompts[1], /# Viser skill reflection task/);
+    assert.match(provider.prompts[1], /focus on reusable recovery steps/);
+    assert.match(provider.prompts[1], /debug a recurring connector failure/);
+
+    const pendingProofs = await assistant.handle("/skill-reflections", "test:curate-skill", { source: "test" });
+    assert.match(pendingProofs, /curated-test-curate-skill-[a-f0-9]{8} \(pending\)/);
+    assert.match(pendingProofs, /mode: curated/);
+
+    assert.match(await assistant.handle(`/approve ${actionId}`, "test:curate-skill", { source: "test" }), /Approved/);
+    const proofLog = await readFile(join(dir, "skills", "reflection-proofs.jsonl"), "utf8");
+    const proof = JSON.parse(proofLog.trim());
+    assert.equal(proof.mode, "curated");
+    assert.equal(proof.providerId, "echo");
+    assert.equal(proof.actionId, actionId);
+    const skill = await readFile(join(dir, "skills", proof.skillId, "SKILL.md"), "utf8");
+    assert.match(skill, /description: Curated reusable procedure from recent Viser session/);
+    assert.match(skill, /echo:echo/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -192,6 +374,7 @@ function testConfig(dir: string): ViserConfig {
     assistant: { ...DEFAULT_CONFIG.assistant, defaultProvider: "echo", workdir: dir },
     storage: { dir: join(dir, "storage") },
     memory: { ...DEFAULT_CONFIG.memory, dir: join(dir, "memory") },
+    personalization: { ...DEFAULT_CONFIG.personalization, dir: join(dir, "personalization") },
     skills: { ...DEFAULT_CONFIG.skills, dirs: [join(dir, "skills")], promptLimit: 8 },
     plugins: { ...DEFAULT_CONFIG.plugins, dirs: [join(dir, "plugins")], promptLimit: 8 },
     tools: { ...DEFAULT_CONFIG.tools, allowedReadRoots: [dir] },
@@ -296,8 +479,8 @@ test("AssistantRuntime includes concrete recovery advice when all providers fail
     assert.match(text, /blocked: detected issue: sandbox\/permission failure/);
     assert.match(text, /manual smoke test: printf/);
     assert.match(text, /login: detected issue: interactive login required/);
-    assert.match(text, /node src\/index.ts verify --live --probe-all-providers/);
-    assert.match(text, /node src\/index.ts launch-status/);
+    assert.match(text, /viser verify --live --probe-all-providers/);
+    assert.match(text, /viser launch-status/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -383,8 +566,11 @@ test("AssistantRuntime dashboard summarizes operational state without provider c
     assert.match(text, /schedules: total=1, enabled=1/);
     assert.match(text, /plugins: 0/);
     assert.match(text, /jobs: pending=1, running=0, done=0, failed=0, cancelled=0/);
+    assert.match(text, /recent jobs: .*pending/);
     assert.match(text, /pending approvals: 1/);
-    assert.match(text, /Final live verdict: `node src\/index.ts launch-status`/);
+    assert.match(text, /Operator activity/);
+    assert.match(text, /Approval required: write-file/);
+    assert.match(text, /Final live verdict: `viser launch-status`/);
     assert.match(text, /Review pending approvals/);
 
     const jsonText = await assistant.handle("/dashboard --json", "test:dashboard", { source: "test" });
@@ -399,7 +585,12 @@ test("AssistantRuntime dashboard summarizes operational state without provider c
     assert.equal(data.state.schedules.total, 1);
     assert.equal(data.state.schedules.enabledCount, 1);
     assert.equal(data.state.jobs.pending, 1);
+    assert.equal(data.state.jobs.recent[0].status, "pending");
+    assert.match(data.state.jobs.recent[0].promptPreview, /dashboard queued work/);
     assert.equal(data.state.pendingApprovals.count, 1);
+    assert.equal(data.state.pendingApprovals.recent[0].type, "write-file");
+    assert.match(data.state.pendingApprovals.recent[0].preview, /write-file proposal/);
+    assert.ok(data.state.operatorActivity.items.some((item: { kind: string; title: string }) => item.kind === "approval" && item.title.includes("write-file")));
     assert.equal(data.providers[0].id, "echo");
     assert.deepEqual(data.capabilities, {
       readOnly: true,
@@ -443,7 +634,7 @@ test("AssistantRuntime can enqueue and run queued jobs", async () => {
     const assistant = new AssistantRuntime(testConfig(dir), { echo: provider });
     const queued = await assistant.handle("/enqueue queued hello", "test:queue", { source: "test" });
     assert.match(queued, /Queued job/);
-    assert.match(queued, /gateway\/service\/job-worker may process this automatically/);
+    assert.match(queued, /foreground gateway\/job-worker may process this automatically/);
 
     const listed = await assistant.handle("/jobs pending", "test:queue", { source: "test" });
     assert.match(listed, /queued hello/);

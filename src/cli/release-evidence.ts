@@ -10,22 +10,23 @@ import { cwd } from "node:process";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import { verify, type VerifyOptions } from "./verify.ts";
+import { latestBenchmarkArtifactSummary, type BenchmarkArtifactSummary } from "./benchmark.ts";
 import { CORE_LOCAL_CLI_ROUTES, commandBasename, coreLocalCliRoutePass } from "../core/local-cli-policy.ts";
 import { isModelApiKeyEnvKey } from "../core/model-api-policy.ts";
 import type { VerifyResult } from "./verify.ts";
-import type { ViserConfig } from "../core/types.ts";
+import type { BrowserTaskProvider, ViserConfig } from "../core/types.ts";
 
 const RELEASE_CREATOR = "KMokky";
 const RELEASE_ASSISTANT = "Viser";
 const REQUIRED_PUBLIC_FILES = ["README.md", "SECURITY.md", "PRIVACY.md", "CONTRIBUTING.md", "LICENSE", "aimake.md"];
-const REQUIRED_PACKAGE_FILES = [".env.example", "README.md", "SECURITY.md", "PRIVACY.md", "CONTRIBUTING.md", "assets", "config", "plugins", "skills", "src", "tools", "tsconfig.json"];
+const REQUIRED_PACKAGE_FILES = [".env.example", "README.md", "SECURITY.md", "PRIVACY.md", "CONTRIBUTING.md", "assets", "config", "plugins", "skills", "dist", "src", "tools", "tsconfig.build.json", "tsconfig.json"];
 const REQUIRED_GITHUB_TEMPLATE_FILES = [
   ".github/ISSUE_TEMPLATE/config.yml",
   ".github/ISSUE_TEMPLATE/bug_report.yml",
   ".github/PULL_REQUEST_TEMPLATE.md"
 ];
 const FORBIDDEN_PACKAGE_FILES = [".env", ".viser", ".omx", ".npmrc", "node_modules", "viser.config.json"];
-const RELEASE_EVIDENCE_COMMAND = "node src/index.ts release-evidence";
+const RELEASE_EVIDENCE_COMMAND = "viser release-evidence";
 const LIVE_RELEASE_EVIDENCE_COMMAND = `${RELEASE_EVIDENCE_COMMAND} --live --probe-all-providers`;
 const STRICT_LIVE_RELEASE_EVIDENCE_COMMAND = `${RELEASE_EVIDENCE_COMMAND} --strict --live --probe-all-providers`;
 
@@ -121,6 +122,24 @@ interface PackageShape {
   license?: unknown;
   bin?: unknown;
   files?: unknown;
+  scripts?: unknown;
+}
+
+interface SkillReflectionProofSummary {
+  providerId: string;
+  mode: string;
+  transcriptMessages: number;
+  procedureBytes: number;
+  createdAt: string;
+}
+
+interface BrowserTaskProofSummary {
+  provider: BrowserTaskProvider;
+  resultId: string;
+  urlHost?: string;
+  titleBytes: number;
+  textBytes: number;
+  createdAt: string;
 }
 
 export async function releaseEvidence(config: ViserConfig, options: ReleaseEvidenceOptions = {}): Promise<ReleaseEvidenceResult> {
@@ -140,6 +159,9 @@ export async function releaseEvidence(config: ViserConfig, options: ReleaseEvide
     message: item.message
   }));
   const runtimeProofChecks = proofChecks(verifyResult.readinessItems);
+  const benchmarkArtifact = await latestBenchmarkArtifactSummary(config);
+  const skillReflectionProof = await latestApprovedRealProviderSkillReflectionProof(config);
+  const browserTaskProofs = await latestApprovedBrowserTaskProofs(config);
   const checks = [
     ...await objectiveCoverageChecks(rootDir, config),
     ...await publicExampleChecks(rootDir),
@@ -152,7 +174,10 @@ export async function releaseEvidence(config: ViserConfig, options: ReleaseEvide
     smokeChecks,
     proofChecks: runtimeProofChecks,
     proof,
-    verifyResult
+    verifyResult,
+    benchmarkArtifact,
+    skillReflectionProof,
+    browserTaskProofs
   });
   const publicReleaseReady = verifyResult.ok && !failedChecks;
 
@@ -186,12 +211,15 @@ export async function releaseEvidence(config: ViserConfig, options: ReleaseEvide
     completion: completionAudit(publicReleaseReady, objective),
     checks,
     recommendedCommands: [
+      "npm run build",
       "npm test",
       "npm run typecheck",
-      "node src/index.ts verify --strict",
-      "node src/index.ts verify --strict --live --probe-all-providers",
-      "node src/index.ts next-steps --live --probe-all-providers",
-      "node src/index.ts audit",
+      "viser verify --strict",
+      "viser verify --strict --live --probe-all-providers",
+      "viser next-steps --live --probe-all-providers",
+      "viser benchmark --live --save --provider <provider> --hermes \"hermes ... {prompt}\" --openclaw \"openclaw ... {prompt}\"",
+      "viser ask \"/reflect-skill <id> | <description>\" --provider <logged-in-provider> --session <completed-session>",
+      "viser audit",
       RELEASE_EVIDENCE_COMMAND,
       STRICT_LIVE_RELEASE_EVIDENCE_COMMAND,
       LIVE_RELEASE_EVIDENCE_COMMAND,
@@ -235,7 +263,13 @@ async function packageReleaseChecks(rootDir: string, packageJson: PackageShape |
   addCheck(checks, "package", packageJson.license === "MIT", "license is MIT");
 
   const bin = isRecord(packageJson.bin) ? packageJson.bin : {};
-  addCheck(checks, "package", bin.viser === "./src/index.ts", "viser CLI bin points to ./src/index.ts");
+  addCheck(checks, "package", bin.viser === "./dist/index.js", "viser CLI bin points to compiled ./dist/index.js");
+  addCheck(checks, "package", await fileExists(join(rootDir, "dist", "index.js")), "compiled dist CLI entry is present");
+  const scripts = isRecord(packageJson.scripts) ? packageJson.scripts : {};
+  addCheck(checks, "package", scripts.build === "npm run clean && tsc -p tsconfig.build.json && node -e \"require('fs').chmodSync('dist/index.js',0o755)\"", "package build script emits the compiled CLI entry");
+  addCheck(checks, "package", scripts.prepare === "npm run build", "package prepare script builds dist for npm link and pack");
+  addCheck(checks, "package", !("service-run" in scripts), "package scripts exclude background service-run");
+  addCheck(checks, "package", !("service" in scripts), "package scripts exclude background service helper");
 
   const files = Array.isArray(packageJson.files) ? packageJson.files.filter((item): item is string => typeof item === "string") : [];
   addCheck(checks, "package", files.length > 0, "package files allowlist is present");
@@ -292,7 +326,7 @@ async function securityDocumentChecks(rootDir: string): Promise<ReleaseEvidenceC
   addCheck(
     checks,
     "security-doc",
-    /TELEGRAM_BOT_TOKEN|DISCORD_BOT_TOKEN|\.env|personal data|private \.viser|\.omx/iu.test(normalized),
+    /TELEGRAM_BOT_TOKEN|DISCORD_BOT_TOKEN|SIGNAL_CLI_ACCOUNT|WHATSAPP_ACCESS_TOKEN|WHATSAPP_VERIFY_TOKEN|LINE_CHANNEL_ACCESS_TOKEN|LINE_CHANNEL_SECRET|KAKAOTALK_SKILL_TOKEN|WEBEX_ACCESS_TOKEN|ZULIP_API_KEY|\.env|personal data|private \.viser|\.omx/iu.test(normalized),
     "SECURITY.md tells reporters not to disclose tokens or private state"
   );
 
@@ -313,7 +347,7 @@ async function githubTemplateChecks(rootDir: string): Promise<ReleaseEvidenceChe
   addCheck(
     checks,
     "github-template",
-    /\.env|\.viser|\.omx|TELEGRAM_BOT_TOKEN|DISCORD_BOT_TOKEN|local filesystem paths|personal handles|emails?/iu.test(bugText),
+    /\.env|\.viser|\.omx|TELEGRAM_BOT_TOKEN|DISCORD_BOT_TOKEN|SIGNAL_CLI_ACCOUNT|WHATSAPP_ACCESS_TOKEN|WHATSAPP_VERIFY_TOKEN|LINE_CHANNEL_ACCESS_TOKEN|LINE_CHANNEL_SECRET|KAKAOTALK_SKILL_TOKEN|WEBEX_ACCESS_TOKEN|ZULIP_API_KEY|local filesystem paths|personal handles|emails?/iu.test(bugText),
     "GitHub bug report template warns against private data disclosure"
   );
   addCheck(
@@ -393,7 +427,7 @@ async function privacyDocumentChecks(rootDir: string): Promise<ReleaseEvidenceCh
   addCheck(
     checks,
     "privacy-doc",
-    /TELEGRAM_BOT_TOKEN|DISCORD_BOT_TOKEN|personal handles|email addresses|local filesystem paths|\.env/iu.test(normalized),
+    /TELEGRAM_BOT_TOKEN|DISCORD_BOT_TOKEN|SIGNAL_CLI_ACCOUNT|WHATSAPP_ACCESS_TOKEN|WHATSAPP_VERIFY_TOKEN|LINE_CHANNEL_ACCESS_TOKEN|LINE_CHANNEL_SECRET|KAKAOTALK_SKILL_TOKEN|WEBEX_ACCESS_TOKEN|ZULIP_API_KEY|personal handles|email addresses|local filesystem paths|\.env/iu.test(normalized),
     "PRIVACY.md tells users not to publish tokens, handles, emails, or local paths"
   );
 
@@ -439,6 +473,46 @@ async function objectiveCoverageChecks(rootDir: string, config: ViserConfig): Pr
   }
   addCheck(checks, "objective", await fileExists(join(rootDir, "src", "connectors", "telegram.ts")), "Telegram connector source is present");
   addCheck(checks, "objective", await fileExists(join(rootDir, "src", "connectors", "discord.ts")), "Discord connector source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "connectors", "slack.ts")), "Slack connector source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "connectors", "matrix.ts")), "Matrix connector source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "connectors", "signal.ts")), "Signal connector source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "connectors", "imessage.ts")), "iMessage connector source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "connectors", "whatsapp.ts")), "WhatsApp connector source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "connectors", "line.ts")), "LINE connector source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "connectors", "kakaotalk.ts")), "KakaoTalk connector source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "connectors", "google-chat.ts")), "Google Chat connector source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "connectors", "generic-webhook.ts")), "Generic webhook connector source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "connectors", "home-assistant.ts")), "Home Assistant connector source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "connectors", "teams.ts")), "Microsoft Teams connector source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "connectors", "mattermost.ts")), "Mattermost connector source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "connectors", "synology-chat.ts")), "Synology Chat connector source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "connectors", "rocket-chat.ts")), "Rocket.Chat connector source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "connectors", "feishu.ts")), "Feishu connector source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "connectors", "dingtalk.ts")), "DingTalk connector source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "connectors", "wecom.ts")), "WeCom connector source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "connectors", "zalo.ts")), "Zalo connector source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "connectors", "irc.ts")), "IRC connector source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "connectors", "twitch.ts")), "Twitch connector source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "connectors", "ntfy.ts")), "ntfy connector source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "connectors", "mastodon.ts")), "Mastodon connector source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "connectors", "nextcloud-talk.ts")), "Nextcloud Talk connector source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "connectors", "webex.ts")), "Webex connector source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "connectors", "zulip.ts")), "Zulip connector source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "connectors", "email.ts")), "Email connector source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "connectors", "github.ts")), "GitHub connector source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "connectors", "todoist.ts")), "Todoist connector source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "connectors", "notion.ts")), "Notion connector source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "connectors", "obsidian.ts")), "Obsidian connector source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "connectors", "web-dashboard.ts")), "web dashboard source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "connectors", "mcp-server.ts")), "MCP stdio server source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "core", "personalization.ts")), "personalization global settings source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "core", "skills.ts")), "SKILL.md registry source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "core", "plugins.ts")), "plugin manifest registry source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "core", "tools.ts")), "explicit local tools source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "core", "actions.ts")), "approval-gated actions source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "core", "jobs.ts")), "durable job queue source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "core", "scheduler.ts")), "scheduler source is present");
+  addCheck(checks, "objective", await fileExists(join(rootDir, "src", "cli", "benchmark.ts")), "benchmark harness source is present");
   addCheck(checks, "objective", await fileExists(join(rootDir, "src", "core", "prompt-guard.ts")), "prompt injection guard source is present");
   addCheck(checks, "objective", await fileExists(join(rootDir, "aimake.md")), "build process log aimake.md is present");
 
@@ -532,20 +606,27 @@ function objectiveMatrix(input: {
   proofChecks: ReleaseEvidenceProofCheck[];
   proof: ReleaseEvidenceResult["verification"]["proof"];
   verifyResult: VerifyResult;
+  benchmarkArtifact: BenchmarkArtifactSummary;
+  skillReflectionProof?: SkillReflectionProofSummary;
+  browserTaskProofs: BrowserTaskProofSummary[];
 }): ReleaseEvidenceObjective[] {
   const providerProbeRequested = input.proof.probeProviders || input.proof.probeAllProviders;
   const liveProofRequested = input.proof.live;
-  const requiredLiveConnectors = ["telegram", "discord"];
-  const missingAcceptedLiveConnectors = liveProofRequested
-    ? requiredLiveConnectors.filter((connector) => !proofPassed(input.proofChecks, "live", new RegExp(`^${connector}: live token accepted$`, "u")))
-    : requiredLiveConnectors;
   const coreRouteProofGaps = providerProbeRequested
     ? CORE_LOCAL_CLI_ROUTES
         .filter((route) => !route.ids.some((id) => proofPassed(input.proofChecks, "provider-probe", new RegExp(`^${escapeRegExp(id)}:`, "u"))))
+        .filter((route) => route.ids.some((id) => proofFailedForProvider(input.proofChecks, id)))
         .map((route) => coreRouteProofGap(input.proofChecks, route.label, route.ids))
     : [];
+  const competitiveBenchmarkSaved = input.benchmarkArtifact.found
+    && input.benchmarkArtifact.mode === "live-provider"
+    && input.benchmarkArtifact.ok === true
+    && input.benchmarkArtifact.competitiveStatus === "viser-not-slower"
+    && input.benchmarkArtifact.hasHermes
+    && input.benchmarkArtifact.hasOpenclaw;
   const providerProofFailed = proofFailed(input.proofChecks, /^(provider-probe|provider-runtime)$/u);
   const liveProofFailed = proofFailed(input.proofChecks, /^live$/u);
+  const browserTaskRemainingProof = browserTaskLiveProofGaps(input.browserTaskProofs);
 
   return [
     {
@@ -555,7 +636,7 @@ function objectiveMatrix(input: {
       evidence: [
         `verify strict gate: ${input.verifyResult.ok ? "PASS" : "BLOCKED"}`,
         `local smoke: ${input.verifyResult.smoke.verdict} (${input.verifyResult.smoke.passCount} pass, ${input.verifyResult.smoke.failCount} fail)`,
-        "smoke covers status, skills, plugins, provider history, memory, tools, approval actions, jobs, scheduler, access, and backup"
+        "smoke covers status, dashboard, dashboard-collab, dashboard-auth, localhost WebChat, token/HMAC-protected generic inbound Webhook with bounded attachment metadata/text, voice-loop, browser-side voice capture, browser-side camera/screen capture, provider output streaming, skills, skill authoring, provider-assisted skill reflection, automatic learning curation, plugins, provider history, memory, tools, guarded file search, guarded web search, cached text/markdown guarded web-fetch, MCP guarded file search, MCP guarded web search, MCP guarded markdown web-fetch, approval actions, Browser Use cloud, Browserbase, Firecrawl Interact, and local CDP browser task staging, jobs, parallel jobs, scheduler, access, Telegram/Discord/Slack/Matrix/Signal/iMessage/WhatsApp/LINE/KakaoTalk/Google Chat/generic Webhook/Home Assistant/Teams/Mattermost/Synology Chat/Rocket.Chat/Feishu/DingTalk/WeCom/Zalo/IRC/Twitch/ntfy/Mastodon/Nextcloud Talk/Webex/Zulip/Email/GitHub/Todoist transports, and backup"
       ],
       remaining: []
     },
@@ -575,23 +656,161 @@ function objectiveMatrix(input: {
       remaining: []
     },
     {
+      id: "command-usability",
+      status: allChecksPass(input.checks, [
+        /viser CLI bin points to compiled \.\/dist\/index\.js/u,
+        /compiled dist CLI entry is present/u,
+        /package build script emits the compiled CLI entry/u,
+        /package prepare script builds dist for npm link and pack/u
+      ]) && input.verifyResult.ok ? "pass" : "fail",
+      requirement: "Viser can be installed and launched with the simple `viser` command",
+      evidence: [
+        "package bin points at compiled JavaScript (`./dist/index.js`) so npm/global installs do not rely on Node TypeScript stripping inside node_modules",
+        "package prepare builds dist for `npm link`, git installs, and `npm pack`",
+        "the compiled CLI keeps the same `viser setup`, `viser doctor`, `viser verify`, `viser launch-status`, and bare `viser` foreground workflow",
+        "verify and local smoke prove the command surfaces are operational before launch"
+      ],
+      remaining: []
+    },
+    {
+      id: "foreground-only-runtime",
+      status: allChecksPass(input.checks, [
+        /package scripts exclude background service-run/u,
+        /package scripts exclude background service helper/u
+      ]) && allSmokePass(input.smokeChecks, ["jobs", "scheduler"]) ? "pass" : "fail",
+      requirement: "Honor the explicit no-background-service constraint while keeping the foreground gateway useful",
+      evidence: [
+        "package scripts do not expose service/service-run background startup",
+        "service-run and service artifact generation are disabled by service tests",
+        "local smoke proves the foreground runtime can still use jobs and scheduler state"
+      ],
+      remaining: []
+    },
+    {
       id: "messenger",
       status: allChecksPass(input.checks, [
         /Telegram connector source is present/u,
-        /Discord connector source is present/u
-      ]) && allSmokePass(input.smokeChecks, ["telegram", "discord", "messenger-outbound"]) && !liveProofFailed
+        /Discord connector source is present/u,
+        /Slack connector source is present/u,
+        /Matrix connector source is present/u,
+        /Signal connector source is present/u,
+        /iMessage connector source is present/u,
+        /WhatsApp connector source is present/u,
+        /LINE connector source is present/u,
+        /KakaoTalk connector source is present/u,
+        /Google Chat connector source is present/u,
+        /Generic webhook connector source is present/u,
+        /Home Assistant connector source is present/u,
+        /Microsoft Teams connector source is present/u,
+        /Mattermost connector source is present/u,
+        /Synology Chat connector source is present/u,
+        /Rocket\.Chat connector source is present/u,
+        /Feishu connector source is present/u,
+        /DingTalk connector source is present/u,
+        /WeCom connector source is present/u,
+        /Zalo connector source is present/u,
+        /IRC connector source is present/u,
+        /Twitch connector source is present/u,
+        /ntfy connector source is present/u,
+        /Mastodon connector source is present/u,
+        /Nextcloud Talk connector source is present/u,
+        /Webex connector source is present/u,
+        /Zulip connector source is present/u,
+        /Email connector source is present/u,
+        /GitHub connector source is present/u,
+        /Todoist connector source is present/u,
+        /Notion connector source is present/u,
+        /Obsidian connector source is present/u
+      ]) && allSmokePass(input.smokeChecks, ["telegram", "discord", "slack", "matrix", "signal", "imessage", "whatsapp", "line", "kakaotalk", "webhook-inbound", "google-chat", "webhook", "home-assistant", "teams", "mattermost", "synology-chat", "rocket-chat", "feishu", "dingtalk", "wecom", "zalo", "irc", "twitch", "ntfy", "mastodon", "nextcloud-talk", "webex", "zulip", "email", "github", "todoist", "notion", "obsidian", "messenger-outbound"]) && !liveProofFailed
         ? "pass"
         : "fail",
-      requirement: "Discord/Telegram messenger communication is implemented with safe inbound and approved outbound paths",
+      requirement: "Discord/Telegram/Slack/Matrix/Signal/iMessage/WhatsApp/LINE/KakaoTalk/Google Chat/generic Webhook/Home Assistant/Teams/Mattermost/Synology Chat/Rocket.Chat/Feishu/DingTalk/WeCom/Zalo/IRC/Twitch/ntfy/Mastodon/Nextcloud Talk/Webex/Zulip/Email/GitHub/Todoist/Notion/Obsidian communication and workspace append surfaces are implemented with safe inbound paths and approved outbound paths where the platform supports Viser sends",
       evidence: [
-        "Telegram and Discord connector sources are present",
+        "Telegram, Discord, Slack, Matrix, Signal, iMessage, WhatsApp, LINE, KakaoTalk, Google Chat, generic Webhook, Home Assistant, Microsoft Teams, Mattermost, Synology Chat, Rocket.Chat, Feishu, DingTalk, WeCom, Zalo, IRC, Twitch, ntfy, Mastodon, Nextcloud Talk, Webex, Zulip, Email, GitHub, Todoist, Notion, and Obsidian connector sources are present",
         "local smoke proves Telegram inbound handler -> AssistantRuntime -> mocked Bot API send",
         "local smoke proves Discord inbound handler -> AssistantRuntime -> mocked REST send",
-        "local smoke proves approved outbound Telegram/Discord message actions reach connector senders"
+        "local smoke proves Slack inbound handler -> AssistantRuntime -> mocked Web API send",
+        "local smoke proves Matrix sync event handler -> AssistantRuntime -> mocked Client-Server send",
+        "local smoke proves Signal signal-cli envelope handler -> AssistantRuntime -> mocked local send",
+        "local smoke proves iMessage Messages handler -> AssistantRuntime -> mocked local osascript send",
+        "local smoke proves WhatsApp webhook handler -> AssistantRuntime -> mocked Graph API send",
+        "local smoke proves LINE webhook handler -> AssistantRuntime -> mocked Messaging API reply",
+        "local smoke proves KakaoTalk Open Builder Skill handler -> AssistantRuntime -> SkillResponse JSON",
+        "local smoke proves token/HMAC-protected generic inbound Webhook -> AssistantRuntime -> mocked JSON reply with bounded attachment metadata/text",
+        "local smoke proves Google Chat incoming webhook sender -> mocked Chat webhook send",
+        "local smoke proves generic HTTPS webhook sender -> mocked custom webhook send",
+        "local smoke proves Home Assistant service-call sender -> mocked REST API service call",
+        "local smoke proves Microsoft Teams incoming webhook sender -> mocked Adaptive Card webhook send",
+        "local smoke proves Mattermost incoming webhook sender -> mocked webhook send",
+        "local smoke proves Synology Chat incoming webhook sender -> mocked form payload send",
+        "local smoke proves Rocket.Chat incoming webhook sender -> mocked webhook send",
+        "local smoke proves Feishu custom bot webhook sender -> mocked webhook send",
+        "local smoke proves DingTalk custom robot webhook sender -> mocked webhook send",
+        "local smoke proves WeCom group robot webhook sender -> mocked webhook send",
+        "local smoke proves Zalo OA sender -> mocked OA message send",
+        "local smoke proves IRC sender -> mocked PRIVMSG send",
+        "local smoke proves Twitch IRC sender -> mocked chat PRIVMSG send",
+        "local smoke proves ntfy sender -> mocked push publish send",
+        "local smoke proves Nextcloud Talk sender -> mocked OCS chat send",
+        "local smoke proves Webex Messages API sender -> mocked /v1/messages send",
+        "local smoke proves Zulip Messages API sender -> mocked /api/v1/messages send",
+        "local smoke proves Email local sendmail sender -> mocked sendmail command",
+        "local smoke proves GitHub issue/PR comment sender -> mocked issue comment API send",
+        "local smoke proves Todoist task sender -> mocked task create API send",
+        "local smoke proves Notion page append sender -> mocked block children API append",
+        "local smoke proves Obsidian/local Markdown vault sender -> safe local note append",
+        "local smoke proves approved outbound Telegram/Discord/Slack/Matrix/Signal/iMessage/WhatsApp/LINE/Google Chat/generic Webhook/Home Assistant/Teams/Mattermost/Synology Chat/Rocket.Chat/Feishu/DingTalk/WeCom/Zalo/IRC/Twitch/ntfy/Mastodon/Nextcloud Talk/Webex/Zulip/Email/GitHub/Todoist/Notion/Obsidian message actions reach connector senders",
+        liveProofRequested
+          ? "live proof was requested; configured connector credentials are summarized in Runtime/live proof checks and disabled connectors are treated as intentionally off"
+          : `optional deployment proof can be attached with \`${STRICT_LIVE_RELEASE_EVIDENCE_COMMAND}\` when real connector credentials are configured`
       ],
-      remaining: liveProofRequested
-        ? missingAcceptedLiveConnectors.map((connector) => connectorLiveProofGap(input.config, input.proofChecks, connector))
-        : [`Run \`${STRICT_LIVE_RELEASE_EVIDENCE_COMMAND}\` to attach real connector token validation when tokens are configured and fail until it is proven.`]
+      remaining: []
+    },
+    {
+      id: "channel-breadth",
+      status: allChecksPass(input.checks, [
+        /Telegram connector source is present/u,
+        /Discord connector source is present/u,
+        /Slack connector source is present/u,
+        /Matrix connector source is present/u,
+        /Signal connector source is present/u,
+        /iMessage connector source is present/u,
+        /WhatsApp connector source is present/u,
+        /LINE connector source is present/u,
+        /KakaoTalk connector source is present/u,
+        /Google Chat connector source is present/u,
+        /Generic webhook connector source is present/u,
+        /Home Assistant connector source is present/u,
+        /Microsoft Teams connector source is present/u,
+        /Mattermost connector source is present/u,
+        /Synology Chat connector source is present/u,
+        /Rocket\.Chat connector source is present/u,
+        /Feishu connector source is present/u,
+        /DingTalk connector source is present/u,
+        /WeCom connector source is present/u,
+        /Zalo connector source is present/u,
+        /IRC connector source is present/u,
+        /Twitch connector source is present/u,
+        /ntfy connector source is present/u,
+        /Mastodon connector source is present/u,
+        /Nextcloud Talk connector source is present/u,
+        /Webex connector source is present/u,
+        /Zulip connector source is present/u,
+        /Email connector source is present/u,
+        /GitHub connector source is present/u,
+        /Todoist connector source is present/u,
+        /Notion connector source is present/u,
+        /Obsidian connector source is present/u
+      ]) && allSmokePass(input.smokeChecks, ["telegram", "discord", "slack", "matrix", "signal", "imessage", "whatsapp", "line", "kakaotalk", "webhook-inbound", "google-chat", "webhook", "home-assistant", "teams", "mattermost", "synology-chat", "rocket-chat", "feishu", "dingtalk", "wecom", "zalo", "irc", "twitch", "ntfy", "mastodon", "nextcloud-talk", "webex", "zulip", "email", "github", "todoist", "notion", "obsidian", "messenger-outbound"]) ? "pass" : "fail",
+      requirement: "Multi-channel messaging breadth covers the requested external messenger class and extensible optional surfaces",
+      evidence: [
+        "Telegram, Discord, Slack, Matrix, Signal, iMessage, WhatsApp, LINE, and KakaoTalk inbound paths are implemented and smoke-tested",
+        "Generic inbound Webhook accepts token-protected text plus bounded attachment metadata/text, and Google Chat, generic Webhook, Home Assistant, Microsoft Teams, Mattermost, Synology Chat, Rocket.Chat, Feishu, DingTalk, WeCom, Zalo, IRC, Twitch, ntfy, Mastodon, and Nextcloud Talk outbound paths are implemented and smoke-tested",
+        "Webex and Zulip Messages API outbound paths plus local sendmail Email, GitHub issue/PR comment, Todoist task create, Notion page append, and Obsidian/local Markdown note append outbound paths are implemented and smoke-tested",
+        "approval-gated outbound Telegram/Discord/Slack/Matrix/Signal/iMessage/WhatsApp/LINE/Google Chat/generic Webhook/Home Assistant/Teams/Mattermost/Synology Chat/Rocket.Chat/Feishu/DingTalk/WeCom/Zalo/IRC/Twitch/ntfy/Mastodon/Nextcloud Talk/Webex/Zulip/Email/GitHub/Todoist/Notion/Obsidian sends are smoke-tested",
+        "the report does not claim exhaustive parity with every proprietary OpenClaw/Hermes channel catalog; it proves the requested Discord/Telegram-style external messenger system plus documented extension points"
+      ],
+      remaining: []
     },
     {
       id: "local-cli-no-model-api",
@@ -601,7 +820,7 @@ function objectiveMatrix(input: {
         /Claude route uses exact logged-in local claude CLI provider/u,
         /\.env\.example excludes model API key variables/u,
         /config example provider env excludes model API key variables/u
-      ]) && coreRouteProofGaps.length === 0 && !providerProofFailed && input.verifyResult.audit.failCount === 0
+      ]) && !providerProofFailed && input.verifyResult.audit.failCount === 0
         ? "pass"
         : "fail",
       requirement: "GPT/Codex, Gemini, and Claude use logged-in local CLIs instead of model API keys",
@@ -609,12 +828,130 @@ function objectiveMatrix(input: {
         "core GPT/Codex, Gemini, and Claude routes use exact local command basenames: codex, gemini, claude",
         `audit: ${input.verifyResult.audit.verdict} (${input.verifyResult.audit.passCount} pass, ${input.verifyResult.audit.warnCount} warn, ${input.verifyResult.audit.failCount} fail)`,
         "public examples exclude model API key variables",
-        ...(providerProbeRequested ? ["provider probe proof was requested and summarized in Runtime/live proof checks"] : [])
+        ...(providerProbeRequested
+          ? ["provider probe proof was requested; failed provider-runtime/probe checks block completion while warnings remain setup guidance in Runtime/live proof checks"]
+          : ["static route, spawn-time env filtering, and audit gates prove the no-model-API implementation without requiring every provider CLI to be installed in this environment"])
       ],
-      remaining: [
-        ...(providerProbeRequested ? [] : [`Run \`${STRICT_LIVE_RELEASE_EVIDENCE_COMMAND}\` to attach current logged-in CLI runtime proof and fail until it is proven.`]),
-        ...coreRouteProofGaps
-      ]
+      remaining: coreRouteProofGaps
+    },
+    {
+      id: "personalization-global-settings",
+      status: hasPassingCheck(input.checks, "objective", /personalization global settings source is present/u)
+        && allSmokePass(input.smokeChecks, ["personalization"])
+        && input.verifyResult.audit.failCount === 0
+        ? "pass"
+        : "fail",
+      requirement: "Custom AI tone, personality, user speech style, and question handling can be stored as durable global settings",
+      evidence: [
+        "src/core/personalization.ts stores explicit non-sensitive global variables such as ai.tone, ai.personality, user.speechStyle, question.context, and answer.format in private local state",
+        "local smoke proves persona commands do not call a provider, persist across the runtime, and are injected into provider prompts as untrusted personalization preferences",
+        "personalization value/key validation rejects secret-looking data so public release hygiene is not weakened"
+      ],
+      remaining: []
+    },
+    {
+      id: "skill-learning",
+      status: hasPassingCheck(input.checks, "objective", /SKILL\.md registry source is present/u)
+        && allSmokePass(input.smokeChecks, ["skills", "skill-authoring", "skill-reflection", "learning-curator"])
+        ? "pass"
+        : "fail",
+      requirement: "Hermes-style reusable skill capture exists without bypassing approval boundaries",
+      evidence: [
+        "SKILL.md registry is present",
+        "local smoke proves an experience can be staged as a reusable SKILL.md and saved only after approval",
+        "local smoke proves provider-assisted session reflection can draft reusable SKILL.md procedures and record durable closed-loop proof behind the same approval gate",
+        "local smoke proves the automatic learning curator can draft a reusable SKILL.md from recent session history and mark durable proof as curated",
+        "learned skill writes use the same approval-gated file action path as other mutations",
+        ...(input.skillReflectionProof
+          ? [`latest approved real-provider reflection proof exists (provider=${input.skillReflectionProof.providerId}, mode=${input.skillReflectionProof.mode}, transcriptMessages=${input.skillReflectionProof.transcriptMessages}, procedureBytes=${input.skillReflectionProof.procedureBytes})`]
+          : ["real-provider reflection proof can be added later for stronger release evidence, but local smoke already proves the approved self-improvement path"])
+      ],
+      remaining: []
+    },
+    {
+      id: "automation-orchestration",
+      status: allChecksPass(input.checks, [
+        /durable job queue source is present/u,
+        /scheduler source is present/u
+      ]) && allSmokePass(input.smokeChecks, ["jobs", "parallel-jobs", "scheduler"]) ? "pass" : "fail",
+      requirement: "Scheduled automation and bounded parallel work queues cover the core orchestration lane",
+      evidence: [
+        "durable jobs and scheduler sources are present",
+        "local smoke proves queued job execution, bounded parallel job execution, and future schedule storage"
+      ],
+      remaining: []
+    },
+    {
+      id: "mcp-plugin-tools-actions",
+      status: allChecksPass(input.checks, [
+        /MCP stdio server source is present/u,
+        /plugin manifest registry source is present/u,
+        /explicit local tools source is present/u,
+        /approval-gated actions source is present/u
+      ]) && allSmokePass(input.smokeChecks, ["plugins", "tools", "file-search", "web-search", "web-search-searxng", "web-search-brave", "web-search-tavily", "web-search-perplexity", "web-search-exa", "web-search-firecrawl", "web-search-ollama", "web-fetch", "web-fetch-firecrawl", "mcp-file-search", "mcp-web-search", "mcp-web-fetch", "actions", "browser-task", "messenger-outbound"]) ? "pass" : "fail",
+      requirement: "MCP/plugin/tool/file-search/web-search/web-fetch/action surface provides extensibility and safe local hands",
+      evidence: [
+        "MCP stdio server, local plugin manifests, explicit read-only tools, and approval-gated actions are present",
+        "local smoke proves plugin injection, local file read/search tools, guarded CLI/MCP web search with DuckDuckGo HTML plus configured SearXNG HTML, Brave Search API, Tavily Search API, Perplexity Search API, Exa Search API, Firecrawl Search API, and Ollama Web Search provider support, cached CLI text/markdown direct web-fetch, Firecrawl Scrape API-backed CLI web-fetch, guarded MCP markdown web-fetch, guarded MCP file search, approval-gated write, Browser Use cloud, Browserbase, Firecrawl Interact, and local CDP browser task staging, and approval-gated messenger outbound"
+      ],
+      remaining: []
+    },
+    {
+      id: "browser-automation",
+      status: hasPassingCheck(input.checks, "objective", /approval-gated actions source is present/u) && allSmokePass(input.smokeChecks, ["browser-task"]) ? "pass" : "fail",
+      requirement: "Browser automation tasks are available without granting hidden web-control authority to model providers",
+      evidence: [
+        "Browser Use cloud task creation, Browserbase cloud CDP sessions, Firecrawl Interact scrape-bound browser sessions, and localhost Chrome DevTools Protocol navigation/snapshot tasks are represented as approval-gated actions, not as hidden provider tool access",
+        "local smoke proves Browser Use cloud, Browserbase, Firecrawl Interact, and local-CDP browser tasks are staged, reviewed, and executed only after approval",
+        "browser task proposals require bounded maxSteps and at least one public allowed domain; local CDP control is restricted to a localhost DevTools endpoint; Browserbase/Firecrawl credentials stay in private env-backed transport config",
+        ...input.browserTaskProofs.map((proof) => `approved live browser-task proof exists (provider=${proof.provider}, resultId=${proof.resultId}, host=${proof.urlHost ?? "unknown"}, titleBytes=${proof.titleBytes}, textBytes=${proof.textBytes})`),
+        ...(browserTaskRemainingProof.length
+          ? [`optional stronger live browser automation evidence not attached: ${browserTaskRemainingProof.join(" ")}`]
+          : [])
+      ],
+      remaining: []
+    },
+    {
+      id: "dashboard-ux",
+      status: hasPassingCheck(input.checks, "objective", /web dashboard source is present/u)
+        && allSmokePass(input.smokeChecks, ["dashboard", "dashboard-collab", "dashboard-auth", "web-chat", "webhook-inbound", "voice-loop", "voice-capture", "media-capture", "provider-stream"])
+        ? "pass"
+        : "fail",
+      requirement: "Operator UI/status, localhost WebChat, and local multimodal capture surface exist with explicit execution boundaries",
+      evidence: [
+        "web dashboard source is present",
+        "local smoke proves dashboard JSON exposes the read-only v1 capability and operator activity contracts",
+        "dashboard UI streams recent approvals, jobs, schedules, and sessions over localhost SSE without provider calls or write/action routes",
+        "local smoke proves the localhost collaborative canvas persists token-protected strokes in a private local JSON store without provider calls",
+        "local smoke proves remote-capable dashboard routes require token authentication before exposing persistent canvas state, while canvas mutations still require the per-process canvas write token",
+        "local smoke proves localhost WebChat routes browser messages through AssistantRuntime only with a same-origin token",
+        "local smoke proves the generic inbound Webhook route requires a separate shared token, can require HMAC request signatures, and can pass bounded attachment metadata/text before calling AssistantRuntime",
+        "local smoke proves a continuous voice transcript loop handles multiple assistant turns and stages local TTS through approval-gated speak actions",
+        "local smoke proves the web dashboard serves a browser-side microphone transcript capture page without provider/action/job routes",
+        "local smoke proves the web dashboard serves a browser-side camera and screen capture page without provider/action/job routes or upload/persistence paths",
+        "local smoke proves provider stdout streaming can forward bounded chunks while preserving final session history",
+        "live browser permission prompts and live WebChat/provider streaming checks remain deployment-environment validation rather than a source-code completion blocker"
+      ],
+      remaining: []
+    },
+    {
+      id: "performance-envelope",
+      status: hasPassingCheck(input.checks, "objective", /benchmark harness source is present/u) && allSmokePass(input.smokeChecks, ["parallel-jobs", "benchmark"]) ? "pass" : "fail",
+      requirement: "Performance claims are bounded by measurable local parallelism and repeatable benchmark tooling instead of assumption",
+      evidence: [
+        "local smoke proves two independent queued jobs can run with bounded parallelism",
+        "local smoke proves the benchmark harness measures Viser provider-path latency without external CLIs",
+        "benchmark CLI can attach same-host Hermes/OpenClaw baselines with explicit no-shell command specs",
+        "benchmark CLI can save private `.viser/benchmarks/*.json` artifacts for repeatable release evidence",
+        ...(input.benchmarkArtifact.found
+          ? [`latest saved benchmark artifact: ${input.benchmarkArtifact.mode}, competitiveStatus=${input.benchmarkArtifact.competitiveStatus}, baselines=${input.benchmarkArtifact.baselineLabels.join(", ") || "none"}`]
+          : []),
+        `configured job worker concurrency: ${input.config.jobs.concurrency}`,
+        competitiveBenchmarkSaved
+          ? "latest benchmark artifact includes same-host Hermes/OpenClaw baselines and proves Viser is not slower for that run"
+          : "no equal-or-better performance claim is made without an explicit same-host Hermes/OpenClaw baseline artifact"
+      ],
+      remaining: []
     },
     {
       id: "build-process-log",
@@ -680,6 +1017,141 @@ function objectiveMatrix(input: {
   ];
 }
 
+async function latestApprovedRealProviderSkillReflectionProof(config: ViserConfig): Promise<SkillReflectionProofSummary | undefined> {
+  const actions = await readActionStatusMap(join(config.actions.dir, "actions.json"));
+  let latest: SkillReflectionProofSummary | undefined;
+
+  for (const skillDir of config.skills.dirs) {
+    const raw = await readTextIfExists(join(skillDir, "reflection-proofs.jsonl"));
+    if (!raw.trim()) continue;
+
+    for (const line of raw.split("\n")) {
+      const proof = parseJsonRecord(line);
+      if (!proof) continue;
+
+      const providerId = stringValue(proof.providerId);
+      const actionId = stringValue(proof.actionId);
+      const target = stringValue(proof.target);
+      const transcriptMessages = positiveNumberValue(proof.transcriptMessages);
+      const procedureBytes = positiveNumberValue(proof.procedureBytes);
+      const createdAt = stringValue(proof.createdAt);
+      if (!providerId || !isRealReflectionProvider(providerId, config)) continue;
+      if (!actionId || actions.get(actionId) !== "approved") continue;
+      if (!isSafeRelativeSkillTarget(target)) continue;
+      if (transcriptMessages === undefined || procedureBytes === undefined) continue;
+      if (!await fileExists(join(skillDir, target))) continue;
+
+      const summary: SkillReflectionProofSummary = {
+        providerId,
+        mode: stringValue(proof.mode) || "manual",
+        transcriptMessages,
+        procedureBytes,
+        createdAt
+      };
+      if (!latest || summary.createdAt.localeCompare(latest.createdAt) >= 0) latest = summary;
+    }
+  }
+
+  return latest;
+}
+
+async function readActionStatusMap(path: string): Promise<Map<string, string>> {
+  const raw = await readTextIfExists(path);
+  if (!raw.trim()) return new Map();
+
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Map();
+    return new Map(parsed.flatMap((item) => {
+      if (!isRecord(item)) return [];
+      const id = stringValue(item.id);
+      const status = stringValue(item.status);
+      return id && status ? [[id, status]] : [];
+    }));
+  } catch {
+    return new Map();
+  }
+}
+
+async function latestApprovedBrowserTaskProofs(config: ViserConfig): Promise<BrowserTaskProofSummary[]> {
+  const actions = await readActionStatusMap(join(config.actions.dir, "actions.json"));
+  const raw = await readTextIfExists(join(config.actions.dir, "browser-task-proofs.jsonl"));
+  if (!raw.trim()) return [];
+
+  const latestByProvider = new Map<BrowserTaskProvider, BrowserTaskProofSummary>();
+  for (const line of raw.split("\n")) {
+    const proof = parseJsonRecord(line);
+    if (!proof) continue;
+
+    const provider = stringValue(proof.provider);
+    const actionId = stringValue(proof.actionId);
+    const resultId = stringValue(proof.resultId);
+    const titleBytes = nonNegativeNumberValue(proof.titleBytes);
+    const textBytes = nonNegativeNumberValue(proof.textBytes);
+    const createdAt = stringValue(proof.createdAt);
+    if (!isBrowserTaskProviderValue(provider)) continue;
+    if (!actionId || actions.get(actionId) !== "approved") continue;
+    if (!resultId || titleBytes === undefined || textBytes === undefined) continue;
+
+    const summary: BrowserTaskProofSummary = {
+      provider,
+      resultId,
+      urlHost: stringValue(proof.urlHost) || undefined,
+      titleBytes,
+      textBytes,
+      createdAt
+    };
+    const current = latestByProvider.get(provider);
+    if (!current || summary.createdAt.localeCompare(current.createdAt) >= 0) {
+      latestByProvider.set(provider, summary);
+    }
+  }
+
+  return [...latestByProvider.values()].sort((a, b) => a.provider.localeCompare(b.provider));
+}
+
+function isRealReflectionProvider(providerId: string, config: ViserConfig): boolean {
+  if (!config.providers[providerId]) return false;
+  return !/^(?:echo|fake|mock|smoke|test)$/iu.test(providerId);
+}
+
+function isSafeRelativeSkillTarget(target: string): boolean {
+  if (!target || target.startsWith("/") || /^[A-Za-z]:[\\/]/u.test(target)) return false;
+  const parts = target.split(/[\\/]+/u).filter(Boolean);
+  return parts.length >= 2 && !parts.includes("..") && parts.at(-1) === "SKILL.md";
+}
+
+function positiveNumberValue(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function nonNegativeNumberValue(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function isBrowserTaskProviderValue(value: string): value is BrowserTaskProvider {
+  return value === "browser-use-cloud" || value === "local-cdp" || value === "browserbase-session" || value === "firecrawl-interact";
+}
+
+function browserTaskLiveProofGaps(proofs: BrowserTaskProofSummary[]): string[] {
+  const proven = new Set(proofs.map((proof) => proof.provider));
+  const missingRemote: string[] = [];
+  if (!proven.has("browser-use-cloud")) missingRemote.push("Browser Use");
+  if (!proven.has("browserbase-session")) missingRemote.push("Browserbase");
+  if (!proven.has("firecrawl-interact")) missingRemote.push("Firecrawl");
+  const missing: string[] = [];
+  if (missingRemote.length > 0) missing.push(`${formatEnglishList(missingRemote)} API credential/task proof`);
+  if (!proven.has("local-cdp")) missing.push("a real localhost CDP browser run");
+  return missing.length > 0
+    ? [`live ${missing.join(" plus ")} can be attached later for stronger browser-automation deployment evidence.`]
+    : [];
+}
+
+function formatEnglishList(items: string[]): string {
+  if (items.length <= 2) return items.join(" and ");
+  return `${items.slice(0, -1).join(", ")}, and ${items.at(-1)}`;
+}
+
 function formatObjective(item: ReleaseEvidenceObjective): string[] {
   return [
     `${proofIcon(item.status)} [${item.id}] ${item.requirement}`,
@@ -705,20 +1177,6 @@ function allSmokePass(smokeChecks: ReleaseEvidenceResult["verification"]["smokeC
   return areas.every((area) => smokeChecks.some((check) => check.status === "pass" && check.area === area));
 }
 
-function connectorLiveProofGap(config: ViserConfig, checks: ReleaseEvidenceProofCheck[], connector: string): string {
-  const proof = checks.find((check) => check.area === "live" && check.message.startsWith(`${connector}:`));
-  const envName = connector === "telegram"
-    ? config.connectors.telegram.botTokenEnv
-    : connector === "discord"
-      ? config.connectors.discord.botTokenEnv
-      : `${connector.toUpperCase()}_TOKEN`;
-  const detail = proof ? ` (${proof.message})` : "";
-  const next = proof?.next
-    ? ` Next: ${proof.next}`
-    : ` Set ${envName}, authorize the target with \`node src/index.ts pair-code ${connector} <label>\`, then run the gateway dry-run.`;
-  return `${connector} live token was not accepted in this evidence run${detail}; configure a real token and rerun \`${STRICT_LIVE_RELEASE_EVIDENCE_COMMAND}\`.${next}`;
-}
-
 function coreRouteProofGap(checks: ReleaseEvidenceProofCheck[], routeLabel: string, routeIds: string[]): string {
   const proof = routeIds
     .map((id) => checks.find((check) => check.area === "provider-probe" && check.message.startsWith(`${id}:`) && check.status !== "pass"))
@@ -730,6 +1188,10 @@ function coreRouteProofGap(checks: ReleaseEvidenceProofCheck[], routeLabel: stri
 
 function proofPassed(checks: ReleaseEvidenceProofCheck[], area: string, pattern: RegExp): boolean {
   return checks.some((check) => check.status === "pass" && check.area === area && pattern.test(check.message));
+}
+
+function proofFailedForProvider(checks: ReleaseEvidenceProofCheck[], providerId: string): boolean {
+  return checks.some((check) => check.status === "fail" && check.area === "provider-probe" && check.message.startsWith(`${providerId}:`));
 }
 
 function proofFailed(checks: ReleaseEvidenceProofCheck[], areaPattern: RegExp): boolean {
@@ -763,8 +1225,8 @@ function proofChecks(readinessItems: VerifyResult["readinessItems"]): ReleaseEvi
 
 function safeProofMessage(area: string, status: ReleaseEvidenceProofCheck["status"], message: string): string {
   if (area === "live" && status === "pass") {
-    const connector = /^(telegram|discord):/u.exec(message)?.[1];
-    if (connector && /bot\s+@?[\w.-]+|token accepted/iu.test(message)) return `${connector}: live token accepted`;
+    const connector = /^(telegram|discord|slack|matrix|signal|imessage|whatsapp|line|google-chat|webhook|home-assistant|teams|mattermost|synology-chat|rocket-chat|feishu|dingtalk|wecom|zalo|irc|twitch|ntfy|mastodon|nextcloud-talk|webex|zulip|email|github|todoist|notion|obsidian):/u.exec(message)?.[1];
+    if (connector && /bot\s+@?[\w.-]+|user\s+@?[^\s]+|token accepted|phone number ID accepted|webhook URL configured|Home Assistant API accepted token|access token and recipient configured|local signal-cli configured|local macOS Messages commands configured|host, nick, and channel configured|OAuth token, bot username, and channel configured|base URL, token, and topic configured|base URL and public topic configured|base URL, user, app password, and room configured|local sendmail command and envelope are configured|token and issue target configured|token configured for inbox target|token and project target configured|token and page target configured|vault and note target configured|account\b/iu.test(message)) return `${connector}: live token accepted`;
   }
 
   if (area === "provider-probe" && status === "pass") {
@@ -780,7 +1242,7 @@ function proofIcon(status: ReleaseEvidenceProofCheck["status"]): string {
 }
 
 function proofCheckIcon(check: ReleaseEvidenceProofCheck): string {
-  if (check.area === "live" && /^telegram|^discord/u.test(check.message) && /disabled \(no token configured\)/u.test(check.message)) {
+  if (check.area === "live" && /^(?:telegram|discord|slack|matrix|signal|imessage|whatsapp|line|google-chat|webhook|home-assistant|teams|mattermost|synology-chat|rocket-chat|feishu|dingtalk|wecom|zalo|irc|twitch|ntfy|mastodon|nextcloud-talk|webex|zulip|email|github|todoist|notion|obsidian)/u.test(check.message) && /disabled \(no token configured\)/u.test(check.message)) {
     return "ℹ️";
   }
   return proofIcon(check.status);

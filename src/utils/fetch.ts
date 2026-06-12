@@ -21,8 +21,6 @@ export async function fetchWithTimeout(
     timedOut = true;
     controller.abort();
   }, Math.max(1, timeoutMs));
-  timeout.unref?.();
-
   try {
     return await fetchImpl(input, { ...init, signal: controller.signal });
   } catch (error) {

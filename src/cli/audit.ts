@@ -12,10 +12,11 @@ import { cwd } from "node:process";
 import { homedir } from "node:os";
 import { configValidationItems } from "../config-validation.ts";
 import { stateHealthItems } from "./state-health.ts";
-import { assertNoSymlinkComponentsUnderRoot, readJsonFile } from "../utils/files.ts";
+import { assertNoSymlinkComponentsUnderRoot, readJsonFile, readPrivateFileIfExists } from "../utils/files.ts";
 import { parseEnvLine, readEnvFileNoFollow } from "../utils/env.ts";
 import { isModelApiKeyEnvKey } from "../core/model-api-policy.ts";
 import { CORE_LOCAL_CLI_ROUTES, commandBasename, configuredCoreRouteProviders } from "../core/local-cli-policy.ts";
+import { normalizePersonalizationState, personalizationSensitivityReasons } from "../core/personalization.ts";
 import type { CliProviderConfig, ViserConfig } from "../core/types.ts";
 
 export type AuditSeverity = "pass" | "warn" | "fail";
@@ -35,6 +36,7 @@ export interface AuditSummary {
 }
 
 const MUTATING_SHELL_COMMANDS = new Set(["rm", "mv", "cp", "chmod", "chown", "sudo", "sh", "bash", "zsh", "python", "python3", "node", "npm", "curl"]);
+const LOCAL_DASHBOARD_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
 const RELEASE_AUTHOR = "KMokky";
 const RELEASE_ALLOWED_AUTHOR_HANDLE = "mok" + "ky";
 const RELEASE_ALLOWED_AUTHOR_NAME = "Mok" + "ky";
@@ -120,6 +122,11 @@ const SENSITIVE_RELEASE_PATTERNS: Array<{ id: string; pattern: RegExp; next: str
     next: "Remove GitHub tokens from public files and rotate the token."
   },
   {
+    id: "notion-token-literal",
+    pattern: /\b(?:secret|ntn)_(?!test\b|example\b|redacted\b)[A-Za-z0-9_-]{20,}\b/iu,
+    next: "Remove Notion tokens from public files and rotate the token."
+  },
+  {
     id: "telegram-token-literal",
     pattern: /\b\d{6,}:[A-Za-z0-9_-]{30,}\b/u,
     next: "Remove Telegram bot tokens from public files and rotate the token."
@@ -130,8 +137,18 @@ const SENSITIVE_RELEASE_PATTERNS: Array<{ id: string; pattern: RegExp; next: str
     next: "Remove Discord bot tokens from public files and rotate the token."
   },
   {
+    id: "slack-token-literal",
+    pattern: /\bx(?:oxb|app)-[A-Za-z0-9-]{20,}\b/u,
+    next: "Remove Slack bot/app tokens from public files and rotate the token."
+  },
+  {
+    id: "matrix-token-literal",
+    pattern: /\bsyt_[A-Za-z0-9_=-]{20,}\b/u,
+    next: "Remove Matrix access tokens from public files and rotate the token."
+  },
+  {
     id: "public-secret-env-assignment",
-    pattern: /\b(?:OPENAI_API_KEY|ANTHROPIC_API_KEY|GEMINI_API_KEY|GOOGLE_GENERATIVE_AI_API_KEY|GOOGLE_API_KEY|DISCORD_BOT_TOKEN|TELEGRAM_BOT_TOKEN|VISER_PROVIDER_SECRET)\s*[:=]\s*["']?(?!(?:redacted|example|demo|dummy|fake|test|placeholder|your-|secret-token|secret-value|sk-test|sk-should-not|shell-secret|tool-api-key|\[REDACTED|<|\$\{|\.\.\.)\b)[A-Za-z0-9][A-Za-z0-9._:-]{11,}/iu,
+    pattern: /\b(?:OPENAI_API_KEY|ANTHROPIC_API_KEY|GEMINI_API_KEY|GOOGLE_GENERATIVE_AI_API_KEY|GOOGLE_API_KEY|DISCORD_BOT_TOKEN|TELEGRAM_BOT_TOKEN|SLACK_BOT_TOKEN|SLACK_APP_TOKEN|MATRIX_ACCESS_TOKEN|SIGNAL_CLI_ACCOUNT|IMESSAGE_CHAT_DB|WHATSAPP_ACCESS_TOKEN|WHATSAPP_PHONE_NUMBER_ID|WHATSAPP_VERIFY_TOKEN|KAKAOTALK_SKILL_TOKEN|GOOGLE_CHAT_WEBHOOK_URL|GOOGLE_CHAT_WEBHOOKS|VISER_WEBHOOK_URL|VISER_WEBHOOKS|VISER_WEBHOOK_INBOUND_TOKEN|HOME_ASSISTANT_BASE_URL|HOME_ASSISTANT_ACCESS_TOKEN|HOME_ASSISTANT_SERVICE|HOME_ASSISTANT_SERVICES|TEAMS_WEBHOOK_URL|TEAMS_WEBHOOKS|MATTERMOST_WEBHOOK_URL|MATTERMOST_WEBHOOKS|SYNOLOGY_CHAT_WEBHOOK_URL|SYNOLOGY_CHAT_WEBHOOKS|ROCKET_CHAT_WEBHOOK_URL|ROCKET_CHAT_WEBHOOKS|FEISHU_WEBHOOK_URL|FEISHU_WEBHOOKS|DINGTALK_WEBHOOK_URL|DINGTALK_WEBHOOKS|WECOM_WEBHOOK_URL|WECOM_WEBHOOKS|ZALO_OA_ACCESS_TOKEN|ZALO_RECIPIENT_ID|ZALO_RECIPIENTS|IRC_HOST|IRC_PORT|IRC_TLS|IRC_NICK|IRC_PASSWORD|IRC_CHANNEL|IRC_CHANNELS|TWITCH_ACCESS_TOKEN|TWITCH_BOT_USERNAME|TWITCH_CHANNEL|TWITCH_CHANNELS|NTFY_BASE_URL|NTFY_TOKEN|NTFY_TOPIC|NTFY_TOPICS|MASTODON_BASE_URL|MASTODON_ACCESS_TOKEN|MASTODON_VISIBILITY|MASTODON_TARGETS|NEXTCLOUD_TALK_BASE_URL|NEXTCLOUD_TALK_USERNAME|NEXTCLOUD_TALK_APP_PASSWORD|NEXTCLOUD_TALK_ROOM_TOKEN|NEXTCLOUD_TALK_ROOMS|WEBEX_ACCESS_TOKEN|ZULIP_SITE_URL|ZULIP_BOT_EMAIL|ZULIP_API_KEY|ZULIP_TARGET|ZULIP_TARGETS|NOTION_TOKEN|NOTION_PAGE_ID|NOTION_PAGES|BRAVE_SEARCH_API_KEY|TAVILY_API_KEY|PERPLEXITY_API_KEY|EXA_API_KEY|FIRECRAWL_API_KEY|OLLAMA_API_KEY|BROWSER_USE_API_KEY|BROWSERBASE_API_KEY|VISER_DASHBOARD_TOKEN|VISER_PROVIDER_SECRET)\s*[:=]\s*["']?(?!(?:redacted|example|demo|dummy|fake|test|placeholder|your-|secret-token|secret-value|sk-test|sk-should-not|shell-secret|tool-api-key|\[REDACTED|<|\$\{|\.\.\.)\b)[A-Za-z0-9+~/][A-Za-z0-9._:+~/ -]{10,}/iu,
     next: "Keep real tokens and API keys in private .env files only; public examples must use placeholders."
   }
 ];
@@ -170,9 +187,11 @@ export async function auditItems(config: ViserConfig): Promise<AuditItem[]> {
   await auditActions(config, items);
   await auditTools(config, items);
   auditStorage(config, items);
+  auditWebDashboard(config, items);
   auditScheduler(config, items);
   auditJobs(config, items);
   await auditState(config, items);
+  await auditPersonalization(config, items);
   await auditPublicRelease(items);
 
   return items;
@@ -315,6 +334,57 @@ async function auditState(config: ViserConfig, items: AuditItem[]): Promise<void
       area: "state",
       message: `${item.area}: ${item.message}`,
       next: item.next
+    });
+  }
+}
+
+async function auditPersonalization(config: ViserConfig, items: AuditItem[]): Promise<void> {
+  if (!config.personalization.enabled) {
+    items.push({ severity: "warn", area: "personalization", message: "personalization settings are disabled" });
+    return;
+  }
+
+  const path = join(config.personalization.dir, "settings.json");
+  let raw: string;
+  try {
+    const maybeRaw = await readPrivateFileIfExists(path, { dirs: [config.personalization.dir] });
+    if (maybeRaw === undefined) {
+      items.push({ severity: "pass", area: "personalization", message: "no personalization state saved yet" });
+      return;
+    }
+    raw = maybeRaw;
+  } catch (error) {
+    items.push({
+      severity: "warn",
+      area: "personalization",
+      message: "could not inspect personalization state",
+      next: error instanceof Error ? error.message : String(error)
+    });
+    return;
+  }
+
+  try {
+    const state = normalizePersonalizationState(JSON.parse(raw));
+    const unsafe = state.settings
+      .map((setting) => ({ setting, reasons: personalizationSensitivityReasons(`${setting.key}\n${setting.value}`) }))
+      .filter((item) => item.reasons.length > 0);
+    if (unsafe.length === 0) {
+      items.push({ severity: "pass", area: "personalization", message: `${state.settings.length} non-sensitive global setting(s) stored` });
+      return;
+    }
+
+    items.push({
+      severity: "fail",
+      area: "personalization",
+      message: `personalization state contains sensitive-looking values (${unsafe.slice(0, 5).map((item) => `${item.setting.key}:${item.reasons.join("+")}`).join(", ")})`,
+      next: "Remove secrets/personal identifiers from .viser/personalization/settings.json with `viser persona unset <key>` or `viser persona clear --force`."
+    });
+  } catch (error) {
+    items.push({
+      severity: "fail",
+      area: "personalization",
+      message: "personalization state is invalid JSON",
+      next: error instanceof Error ? error.message : String(error)
     });
   }
 }
@@ -650,7 +720,37 @@ async function providerPathCommandAudit(provider: CliProviderConfig, projectRoot
 function auditAccessAndConnectors(config: ViserConfig, configFile: unknown, items: AuditItem[]): void {
   const telegramEnabled = config.connectors.telegram.enabled || Boolean(config.connectors.telegram.botToken);
   const discordEnabled = config.connectors.discord.enabled || Boolean(config.connectors.discord.botToken);
-  const anyConnectorEnabled = telegramEnabled || discordEnabled;
+  const slackEnabled = config.connectors.slack.enabled || Boolean(config.connectors.slack.botToken);
+  const matrixEnabled = config.connectors.matrix.enabled || Boolean(config.connectors.matrix.accessToken);
+  const signalEnabled = config.connectors.signal.enabled || Boolean(config.connectors.signal.account);
+  const imessageEnabled = config.connectors.imessage.enabled;
+  const whatsappEnabled = config.connectors.whatsapp.enabled || Boolean(config.connectors.whatsapp.accessToken);
+  const lineEnabled = config.connectors.line.enabled || Boolean(config.connectors.line.channelAccessToken);
+  const kakaotalkEnabled = config.connectors.kakaotalk.enabled || Boolean(config.connectors.kakaotalk.requestToken);
+  const googleChatEnabled = config.connectors.googleChat.enabled || hasConfiguredWebhook(config.connectors.googleChat);
+  const genericWebhookEnabled = config.connectors.webhook.enabled || hasConfiguredWebhook(config.connectors.webhook);
+  const homeAssistantEnabled = config.connectors.homeAssistant.enabled || hasHomeAssistantCredentials(config.connectors.homeAssistant);
+  const teamsEnabled = config.connectors.teams.enabled || hasConfiguredWebhook(config.connectors.teams);
+  const mattermostEnabled = config.connectors.mattermost.enabled || hasConfiguredWebhook(config.connectors.mattermost);
+  const synologyChatEnabled = config.connectors.synologyChat.enabled || hasConfiguredWebhook(config.connectors.synologyChat);
+  const rocketChatEnabled = config.connectors.rocketChat.enabled || hasConfiguredWebhook(config.connectors.rocketChat);
+  const feishuEnabled = config.connectors.feishu.enabled || hasConfiguredWebhook(config.connectors.feishu);
+  const dingTalkEnabled = config.connectors.dingtalk.enabled || hasConfiguredWebhook(config.connectors.dingtalk);
+  const weComEnabled = config.connectors.wecom.enabled || hasConfiguredWebhook(config.connectors.wecom);
+  const zaloEnabled = config.connectors.zalo.enabled || hasZaloCredentials(config.connectors.zalo);
+  const ircEnabled = config.connectors.irc.enabled || hasIrcCredentials(config.connectors.irc);
+  const twitchEnabled = config.connectors.twitch.enabled || hasTwitchCredentials(config.connectors.twitch);
+  const ntfyEnabled = config.connectors.ntfy.enabled || hasNtfyTarget(config.connectors.ntfy);
+  const mastodonEnabled = config.connectors.mastodon.enabled || hasMastodonCredentials(config.connectors.mastodon);
+  const nextcloudTalkEnabled = config.connectors.nextcloudTalk.enabled || hasNextcloudTalkCredentials(config.connectors.nextcloudTalk);
+  const webexEnabled = config.connectors.webex.enabled || Boolean(config.connectors.webex.accessToken);
+  const zulipEnabled = config.connectors.zulip.enabled || hasZulipCredentials(config.connectors.zulip);
+  const emailEnabled = config.connectors.email.enabled || hasEmailEnvelope(config.connectors.email);
+  const githubEnabled = config.connectors.github.enabled || hasGitHubCredentials(config.connectors.github);
+  const todoistEnabled = config.connectors.todoist.enabled || hasTodoistCredentials(config.connectors.todoist);
+  const notionEnabled = config.connectors.notion.enabled || hasNotionCredentials(config.connectors.notion);
+  const obsidianEnabled = config.connectors.obsidian.enabled || hasObsidianTarget(config.connectors.obsidian);
+  const anyConnectorEnabled = telegramEnabled || discordEnabled || slackEnabled || matrixEnabled || signalEnabled || imessageEnabled || whatsappEnabled || lineEnabled || kakaotalkEnabled || googleChatEnabled || genericWebhookEnabled || homeAssistantEnabled || teamsEnabled || mattermostEnabled || synologyChatEnabled || rocketChatEnabled || feishuEnabled || dingTalkEnabled || weComEnabled || zaloEnabled || ircEnabled || twitchEnabled || ntfyEnabled || mastodonEnabled || nextcloudTalkEnabled || webexEnabled || zulipEnabled || emailEnabled || githubEnabled || todoistEnabled || notionEnabled || obsidianEnabled;
 
   if (!config.access.enabled && anyConnectorEnabled) {
     items.push({
@@ -664,7 +764,7 @@ function auditAccessAndConnectors(config: ViserConfig, configFile: unknown, item
       severity: "fail",
       area: "access",
       message: "access.defaultPolicy=open with an active messenger connector",
-      next: "Use pairing or allowlist for public Telegram/Discord bots."
+      next: "Use pairing or allowlist for public Telegram/Discord/Slack/Matrix/Signal/iMessage/WhatsApp/LINE/KakaoTalk/Google Chat/generic Webhook/Home Assistant/Teams/Mattermost/Synology Chat/Rocket.Chat/Feishu/DingTalk/WeCom/Zalo/IRC/Twitch/ntfy/Mastodon/Nextcloud Talk/Webex/Zulip/Email/GitHub/Todoist/Notion connectors."
     });
   } else if (config.access.defaultPolicy === "open") {
     items.push({ severity: "warn", area: "access", message: "access.defaultPolicy=open", next: "Use pairing before enabling public connectors." });
@@ -680,6 +780,353 @@ function auditAccessAndConnectors(config: ViserConfig, configFile: unknown, item
     items.push({ severity: "fail", area: "discord", message: "Discord prefix is empty while Discord is enabled" });
   } else {
     items.push({ severity: "pass", area: "discord", message: "Discord prefix/access shape is valid" });
+  }
+
+  if (config.connectors.slack.enabled && !config.connectors.slack.prefix.trim()) {
+    items.push({ severity: "fail", area: "slack", message: "Slack prefix is empty while Slack is enabled" });
+  } else {
+    items.push({ severity: "pass", area: "slack", message: "Slack prefix/access shape is valid" });
+  }
+
+  if (config.connectors.matrix.enabled && !config.connectors.matrix.prefix.trim()) {
+    items.push({ severity: "fail", area: "matrix", message: "Matrix prefix is empty while Matrix is enabled" });
+  } else {
+    items.push({ severity: "pass", area: "matrix", message: "Matrix prefix/access shape is valid" });
+  }
+
+  if (config.connectors.signal.enabled && !config.connectors.signal.account) {
+    items.push({
+      severity: "fail",
+      area: "signal",
+      message: "Signal is enabled without a local signal-cli account",
+      next: `Set ${config.connectors.signal.accountEnv} or disable Signal.`
+    });
+  } else {
+    items.push({ severity: "pass", area: "signal", message: "Signal account/access shape is valid" });
+  }
+
+  if (config.connectors.imessage.enabled && (!config.connectors.imessage.sqliteCommand.trim() || !config.connectors.imessage.osascriptCommand.trim() || !config.connectors.imessage.chatDbPath.trim())) {
+    items.push({
+      severity: "fail",
+      area: "imessage",
+      message: "iMessage is enabled without local Messages command configuration",
+      next: `Set ${config.connectors.imessage.sqliteCommandEnv}/${config.connectors.imessage.osascriptCommandEnv}/${config.connectors.imessage.chatDbPathEnv} or disable iMessage.`
+    });
+  } else {
+    items.push({ severity: "pass", area: "imessage", message: "iMessage local command/access shape is valid" });
+  }
+
+  if (config.connectors.whatsapp.enabled && (!config.connectors.whatsapp.accessToken || !config.connectors.whatsapp.phoneNumberId || !config.connectors.whatsapp.verifyToken)) {
+    items.push({
+      severity: "fail",
+      area: "whatsapp",
+      message: "WhatsApp is enabled without Cloud API token, phone number ID, or webhook verify token",
+      next: `Set ${config.connectors.whatsapp.accessTokenEnv}/${config.connectors.whatsapp.phoneNumberIdEnv}/${config.connectors.whatsapp.verifyTokenEnv} or disable WhatsApp.`
+    });
+  } else {
+    items.push({ severity: "pass", area: "whatsapp", message: "WhatsApp Cloud API access shape is valid" });
+  }
+
+  if (config.connectors.line.enabled && (!config.connectors.line.channelAccessToken || !config.connectors.line.channelSecret)) {
+    items.push({
+      severity: "fail",
+      area: "line",
+      message: "LINE is enabled without a channel access token or channel secret",
+      next: `Set ${config.connectors.line.channelAccessTokenEnv}/${config.connectors.line.channelSecretEnv} or disable LINE.`
+    });
+  } else {
+    items.push({ severity: "pass", area: "line", message: "LINE Messaging API access shape is valid" });
+  }
+
+  if (config.connectors.kakaotalk.enabled && !config.connectors.kakaotalk.requestToken) {
+    items.push({
+      severity: "fail",
+      area: "kakaotalk",
+      message: "KakaoTalk is enabled without a shared Skill request token",
+      next: `Set ${config.connectors.kakaotalk.requestTokenEnv} or disable KakaoTalk.`
+    });
+  } else {
+    items.push({ severity: "pass", area: "kakaotalk", message: "KakaoTalk Open Builder Skill access shape is valid" });
+  }
+
+  if (config.connectors.googleChat.enabled && !hasConfiguredWebhook(config.connectors.googleChat)) {
+    items.push({
+      severity: "fail",
+      area: "google-chat",
+      message: "Google Chat is enabled without an incoming webhook URL",
+      next: `Set ${config.connectors.googleChat.webhookUrlEnv}/${config.connectors.googleChat.webhookUrlsEnv} or disable Google Chat.`
+    });
+  } else {
+    items.push({ severity: "pass", area: "google-chat", message: "Google Chat webhook access shape is valid" });
+  }
+
+  if (config.connectors.webhook.enabled && !hasConfiguredWebhook(config.connectors.webhook)) {
+    items.push({
+      severity: "fail",
+      area: "webhook",
+      message: "Generic webhook is enabled without an HTTPS webhook URL",
+      next: `Set ${config.connectors.webhook.webhookUrlEnv}/${config.connectors.webhook.webhookUrlsEnv} or disable generic Webhook.`
+    });
+  } else {
+    items.push({ severity: "pass", area: "webhook", message: "Generic HTTPS webhook access shape is valid" });
+  }
+  if (config.connectors.webhook.inboundEnabled && !isStrongSharedSecret(config.connectors.webhook.inboundToken)) {
+    items.push({
+      severity: "fail",
+      area: "webhook-inbound",
+      message: "Generic inbound webhook is enabled without a strong shared token",
+      next: `Set ${config.connectors.webhook.inboundTokenEnv ?? "VISER_WEBHOOK_INBOUND_TOKEN"} to a high-entropy token or disable connectors.webhook.inboundEnabled.`
+    });
+  } else if (config.connectors.webhook.inboundEnabled && !config.webDashboard.enabled) {
+    items.push({
+      severity: "fail",
+      area: "webhook-inbound",
+      message: "Generic inbound webhook is enabled but the web dashboard server is disabled",
+      next: "Enable webDashboard for the foreground HTTP server or disable connectors.webhook.inboundEnabled."
+    });
+  } else if (config.connectors.webhook.inboundEnabled) {
+    items.push({ severity: "pass", area: "webhook-inbound", message: "Generic inbound webhook requires a strong shared token" });
+  }
+  if (config.connectors.webhook.inboundSignatureSecret && !isStrongSharedSecret(config.connectors.webhook.inboundSignatureSecret)) {
+    items.push({
+      severity: "fail",
+      area: "webhook-inbound",
+      message: "Generic inbound webhook signature secret is too weak",
+      next: `Set ${config.connectors.webhook.inboundSignatureSecretEnv ?? "VISER_WEBHOOK_INBOUND_SIGNATURE_SECRET"} to a high-entropy secret or remove it.`
+    });
+  } else if (config.connectors.webhook.inboundEnabled && config.connectors.webhook.inboundSignatureSecret) {
+    items.push({ severity: "pass", area: "webhook-inbound", message: "Generic inbound webhook signature secret is strong" });
+  }
+
+  if (config.connectors.homeAssistant.enabled && !hasHomeAssistantCredentials(config.connectors.homeAssistant)) {
+    items.push({
+      severity: "fail",
+      area: "home-assistant",
+      message: "Home Assistant is enabled without base URL, access token, or a configured service alias",
+      next: `Set ${config.connectors.homeAssistant.baseUrlEnv}/${config.connectors.homeAssistant.accessTokenEnv}/${config.connectors.homeAssistant.serviceEnv}/${config.connectors.homeAssistant.servicesEnv} or disable Home Assistant.`
+    });
+  } else {
+    items.push({ severity: "pass", area: "home-assistant", message: "Home Assistant service-call access shape is valid" });
+  }
+
+  if (config.connectors.teams.enabled && !hasConfiguredWebhook(config.connectors.teams)) {
+    items.push({
+      severity: "fail",
+      area: "teams",
+      message: "Microsoft Teams is enabled without an incoming webhook URL",
+      next: `Set ${config.connectors.teams.webhookUrlEnv}/${config.connectors.teams.webhookUrlsEnv} or disable Teams.`
+    });
+  } else {
+    items.push({ severity: "pass", area: "teams", message: "Microsoft Teams webhook access shape is valid" });
+  }
+
+  if (config.connectors.mattermost.enabled && !hasConfiguredWebhook(config.connectors.mattermost)) {
+    items.push({
+      severity: "fail",
+      area: "mattermost",
+      message: "Mattermost is enabled without an incoming webhook URL",
+      next: `Set ${config.connectors.mattermost.webhookUrlEnv}/${config.connectors.mattermost.webhookUrlsEnv} or disable Mattermost.`
+    });
+  } else {
+    items.push({ severity: "pass", area: "mattermost", message: "Mattermost webhook access shape is valid" });
+  }
+
+  if (config.connectors.synologyChat.enabled && !hasConfiguredWebhook(config.connectors.synologyChat)) {
+    items.push({
+      severity: "fail",
+      area: "synology-chat",
+      message: "Synology Chat is enabled without an incoming webhook URL",
+      next: `Set ${config.connectors.synologyChat.webhookUrlEnv}/${config.connectors.synologyChat.webhookUrlsEnv} or disable Synology Chat.`
+    });
+  } else {
+    items.push({ severity: "pass", area: "synology-chat", message: "Synology Chat webhook access shape is valid" });
+  }
+
+  if (config.connectors.rocketChat.enabled && !hasConfiguredWebhook(config.connectors.rocketChat)) {
+    items.push({
+      severity: "fail",
+      area: "rocket-chat",
+      message: "Rocket.Chat is enabled without an incoming webhook URL",
+      next: `Set ${config.connectors.rocketChat.webhookUrlEnv}/${config.connectors.rocketChat.webhookUrlsEnv} or disable Rocket.Chat.`
+    });
+  } else {
+    items.push({ severity: "pass", area: "rocket-chat", message: "Rocket.Chat webhook access shape is valid" });
+  }
+
+  if (config.connectors.feishu.enabled && !hasConfiguredWebhook(config.connectors.feishu)) {
+    items.push({
+      severity: "fail",
+      area: "feishu",
+      message: "Feishu is enabled without a custom bot webhook URL",
+      next: `Set ${config.connectors.feishu.webhookUrlEnv}/${config.connectors.feishu.webhookUrlsEnv} or disable Feishu.`
+    });
+  } else {
+    items.push({ severity: "pass", area: "feishu", message: "Feishu webhook access shape is valid" });
+  }
+
+  if (config.connectors.dingtalk.enabled && !hasConfiguredWebhook(config.connectors.dingtalk)) {
+    items.push({
+      severity: "fail",
+      area: "dingtalk",
+      message: "DingTalk is enabled without a custom robot webhook URL",
+      next: `Set ${config.connectors.dingtalk.webhookUrlEnv}/${config.connectors.dingtalk.webhookUrlsEnv} or disable DingTalk.`
+    });
+  } else {
+    items.push({ severity: "pass", area: "dingtalk", message: "DingTalk webhook access shape is valid" });
+  }
+
+  if (config.connectors.wecom.enabled && !hasConfiguredWebhook(config.connectors.wecom)) {
+    items.push({
+      severity: "fail",
+      area: "wecom",
+      message: "WeCom is enabled without a group robot webhook URL",
+      next: `Set ${config.connectors.wecom.webhookUrlEnv}/${config.connectors.wecom.webhookUrlsEnv} or disable WeCom.`
+    });
+  } else {
+    items.push({ severity: "pass", area: "wecom", message: "WeCom webhook access shape is valid" });
+  }
+
+  if (config.connectors.zalo.enabled && !hasZaloCredentials(config.connectors.zalo)) {
+    items.push({
+      severity: "fail",
+      area: "zalo",
+      message: "Zalo is enabled without an OA access token and recipient alias",
+      next: `Set ${config.connectors.zalo.accessTokenEnv} and ${config.connectors.zalo.recipientEnv}/${config.connectors.zalo.recipientsEnv} or disable Zalo.`
+    });
+  } else {
+    items.push({ severity: "pass", area: "zalo", message: "Zalo OA access shape is valid" });
+  }
+
+  if (config.connectors.irc.enabled && !hasIrcCredentials(config.connectors.irc)) {
+    items.push({
+      severity: "fail",
+      area: "irc",
+      message: "IRC is enabled without host, nick, and channel alias",
+      next: `Set ${config.connectors.irc.hostEnv}/${config.connectors.irc.nickEnv}/${config.connectors.irc.channelEnv}/${config.connectors.irc.channelsEnv} or disable IRC.`
+    });
+  } else {
+    items.push({ severity: "pass", area: "irc", message: "IRC access shape is valid" });
+  }
+
+  if (config.connectors.twitch.enabled && !hasTwitchCredentials(config.connectors.twitch)) {
+    items.push({
+      severity: "fail",
+      area: "twitch",
+      message: "Twitch is enabled without OAuth token, bot username, and channel alias",
+      next: `Set ${config.connectors.twitch.accessTokenEnv}/${config.connectors.twitch.botUsernameEnv}/${config.connectors.twitch.channelEnv}/${config.connectors.twitch.channelsEnv} or disable Twitch.`
+    });
+  } else {
+    items.push({ severity: "pass", area: "twitch", message: "Twitch IRC access shape is valid" });
+  }
+
+  if (config.connectors.ntfy.enabled && !hasNtfyTarget(config.connectors.ntfy)) {
+    items.push({
+      severity: "fail",
+      area: "ntfy",
+      message: "ntfy is enabled without a topic alias",
+      next: `Set ${config.connectors.ntfy.topicEnv}/${config.connectors.ntfy.topicsEnv} or disable ntfy.`
+    });
+  } else {
+    items.push({ severity: "pass", area: "ntfy", message: "ntfy push access shape is valid" });
+  }
+
+  if (config.connectors.mastodon.enabled && !hasMastodonCredentials(config.connectors.mastodon)) {
+    items.push({
+      severity: "fail",
+      area: "mastodon",
+      message: "Mastodon is enabled without base URL and access token",
+      next: `Set ${config.connectors.mastodon.baseUrlEnv}/${config.connectors.mastodon.accessTokenEnv} or disable Mastodon.`
+    });
+  } else {
+    items.push({ severity: "pass", area: "mastodon", message: "Mastodon status access shape is valid" });
+  }
+
+  if (config.connectors.nextcloudTalk.enabled && !hasNextcloudTalkCredentials(config.connectors.nextcloudTalk)) {
+    items.push({
+      severity: "fail",
+      area: "nextcloud-talk",
+      message: "Nextcloud Talk is enabled without base URL, username, app password, and room alias",
+      next: `Set ${config.connectors.nextcloudTalk.baseUrlEnv}/${config.connectors.nextcloudTalk.usernameEnv}/${config.connectors.nextcloudTalk.appPasswordEnv}/${config.connectors.nextcloudTalk.roomTokenEnv}/${config.connectors.nextcloudTalk.roomsEnv} or disable Nextcloud Talk.`
+    });
+  } else {
+    items.push({ severity: "pass", area: "nextcloud-talk", message: "Nextcloud Talk OCS access shape is valid" });
+  }
+
+  if (config.connectors.webex.enabled && !config.connectors.webex.accessToken) {
+    items.push({
+      severity: "fail",
+      area: "webex",
+      message: "Webex is enabled without a Messages API access token",
+      next: `Set ${config.connectors.webex.accessTokenEnv} or disable Webex.`
+    });
+  } else {
+    items.push({ severity: "pass", area: "webex", message: "Webex Messages API access shape is valid" });
+  }
+
+  if (config.connectors.zulip.enabled && (!hasZulipCredentials(config.connectors.zulip) || !hasZulipTarget(config.connectors.zulip))) {
+    items.push({
+      severity: "fail",
+      area: "zulip",
+      message: "Zulip is enabled without site URL, bot email, API key, or target alias configuration",
+      next: `Set ${config.connectors.zulip.siteUrlEnv}/${config.connectors.zulip.botEmailEnv}/${config.connectors.zulip.apiKeyEnv}/${config.connectors.zulip.targetEnv}/${config.connectors.zulip.targetsEnv} or disable Zulip.`
+    });
+  } else {
+    items.push({ severity: "pass", area: "zulip", message: "Zulip Messages API access shape is valid" });
+  }
+
+  if (config.connectors.email.enabled && (!config.connectors.email.from || !hasEmailEnvelope(config.connectors.email) || !config.connectors.email.sendmailCommand.trim())) {
+    items.push({
+      severity: "fail",
+      area: "email",
+      message: "Email is enabled without local sendmail command, from address, or recipient alias configuration",
+      next: `Set ${config.connectors.email.sendmailCommandEnv}/${config.connectors.email.fromEnv}/${config.connectors.email.recipientEnv}/${config.connectors.email.recipientsEnv} or disable Email.`
+    });
+  } else {
+    items.push({ severity: "pass", area: "email", message: "Email local sendmail access shape is valid" });
+  }
+
+  if (config.connectors.github.enabled && !hasGitHubCredentials(config.connectors.github)) {
+    items.push({
+      severity: "fail",
+      area: "github",
+      message: "GitHub is enabled without token and issue/PR target alias configuration",
+      next: `Set ${config.connectors.github.tokenEnv}/${config.connectors.github.targetEnv}/${config.connectors.github.targetsEnv} or disable GitHub.`
+    });
+  } else {
+    items.push({ severity: "pass", area: "github", message: "GitHub issue/PR comment access shape is valid" });
+  }
+
+  if (config.connectors.todoist.enabled && !hasTodoistCredentials(config.connectors.todoist)) {
+    items.push({
+      severity: "fail",
+      area: "todoist",
+      message: "Todoist is enabled without an API token",
+      next: `Set ${config.connectors.todoist.tokenEnv}/${config.connectors.todoist.projectEnv}/${config.connectors.todoist.projectsEnv} or disable Todoist.`
+    });
+  } else {
+    items.push({ severity: "pass", area: "todoist", message: "Todoist task-create access shape is valid" });
+  }
+
+  if (config.connectors.notion.enabled && !hasNotionCredentials(config.connectors.notion)) {
+    items.push({
+      severity: "fail",
+      area: "notion",
+      message: "Notion is enabled without token and page alias configuration",
+      next: `Set ${config.connectors.notion.tokenEnv}/${config.connectors.notion.pageEnv}/${config.connectors.notion.pagesEnv} or disable Notion.`
+    });
+  } else {
+    items.push({ severity: "pass", area: "notion", message: "Notion page append access shape is valid" });
+  }
+
+  if (config.connectors.obsidian.enabled && !hasObsidianTarget(config.connectors.obsidian)) {
+    items.push({
+      severity: "fail",
+      area: "obsidian",
+      message: "Obsidian is enabled without vault and note alias configuration",
+      next: `Set ${config.connectors.obsidian.vaultDirEnv}/${config.connectors.obsidian.noteEnv}/${config.connectors.obsidian.notesEnv} or disable Obsidian.`
+    });
+  } else {
+    items.push({ severity: "pass", area: "obsidian", message: "Obsidian local note append access shape is valid" });
   }
 
   if (hasPath(configFile, ["connectors", "telegram", "botToken"])) {
@@ -699,6 +1146,435 @@ function auditAccessAndConnectors(config: ViserConfig, configFile: unknown, item
       next: `Move it to ${config.connectors.discord.botTokenEnv} or .env.`
     });
   }
+
+  if (hasPath(configFile, ["connectors", "slack", "botToken"]) || hasPath(configFile, ["connectors", "slack", "appToken"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "Slack token appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.connectors.slack.botTokenEnv}/${config.connectors.slack.appTokenEnv} or .env.`
+    });
+  }
+
+  if (hasPath(configFile, ["connectors", "matrix", "accessToken"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "Matrix token appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.connectors.matrix.accessTokenEnv} or .env.`
+    });
+  }
+
+  if (hasPath(configFile, ["connectors", "signal", "account"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "Signal account appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.connectors.signal.accountEnv} or .env.`
+    });
+  }
+
+  if (hasPath(configFile, ["connectors", "whatsapp", "accessToken"]) || hasPath(configFile, ["connectors", "whatsapp", "phoneNumberId"]) || hasPath(configFile, ["connectors", "whatsapp", "verifyToken"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "WhatsApp credential appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.connectors.whatsapp.accessTokenEnv}/${config.connectors.whatsapp.phoneNumberIdEnv}/${config.connectors.whatsapp.verifyTokenEnv} or .env.`
+    });
+  }
+
+  if (hasPath(configFile, ["connectors", "line", "channelAccessToken"]) || hasPath(configFile, ["connectors", "line", "channelSecret"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "LINE credential appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.connectors.line.channelAccessTokenEnv}/${config.connectors.line.channelSecretEnv} or .env.`
+    });
+  }
+
+  if (hasPath(configFile, ["connectors", "kakaotalk", "requestToken"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "KakaoTalk Skill shared token appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.connectors.kakaotalk.requestTokenEnv} or .env.`
+    });
+  }
+
+  if (hasPath(configFile, ["connectors", "googleChat", "webhookUrl"]) || hasPath(configFile, ["connectors", "googleChat", "webhookUrls"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "Google Chat webhook URL appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.connectors.googleChat.webhookUrlEnv}/${config.connectors.googleChat.webhookUrlsEnv} or .env.`
+    });
+  }
+
+  if (hasPath(configFile, ["connectors", "webhook", "webhookUrl"]) || hasPath(configFile, ["connectors", "webhook", "webhookUrls"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "Generic webhook URL appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.connectors.webhook.webhookUrlEnv}/${config.connectors.webhook.webhookUrlsEnv} or .env.`
+    });
+  }
+  if (hasPath(configFile, ["connectors", "webhook", "inboundToken"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "Generic inbound webhook token appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.connectors.webhook.inboundTokenEnv ?? "VISER_WEBHOOK_INBOUND_TOKEN"} or .env.`
+    });
+  }
+
+  if (
+    hasPath(configFile, ["connectors", "homeAssistant", "baseUrl"])
+    || hasPath(configFile, ["connectors", "homeAssistant", "accessToken"])
+    || hasPath(configFile, ["connectors", "homeAssistant", "service"])
+    || hasPath(configFile, ["connectors", "homeAssistant", "services"])
+  ) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "Home Assistant URL, token, or service alias appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.connectors.homeAssistant.baseUrlEnv}/${config.connectors.homeAssistant.accessTokenEnv}/${config.connectors.homeAssistant.serviceEnv}/${config.connectors.homeAssistant.servicesEnv} or .env.`
+    });
+  }
+
+  if (hasPath(configFile, ["connectors", "teams", "webhookUrl"]) || hasPath(configFile, ["connectors", "teams", "webhookUrls"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "Microsoft Teams webhook URL appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.connectors.teams.webhookUrlEnv}/${config.connectors.teams.webhookUrlsEnv} or .env.`
+    });
+  }
+
+  if (hasPath(configFile, ["connectors", "mattermost", "webhookUrl"]) || hasPath(configFile, ["connectors", "mattermost", "webhookUrls"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "Mattermost webhook URL appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.connectors.mattermost.webhookUrlEnv}/${config.connectors.mattermost.webhookUrlsEnv} or .env.`
+    });
+  }
+
+  if (hasPath(configFile, ["connectors", "synologyChat", "webhookUrl"]) || hasPath(configFile, ["connectors", "synologyChat", "webhookUrls"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "Synology Chat webhook URL appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.connectors.synologyChat.webhookUrlEnv}/${config.connectors.synologyChat.webhookUrlsEnv} or .env.`
+    });
+  }
+
+  if (hasPath(configFile, ["connectors", "rocketChat", "webhookUrl"]) || hasPath(configFile, ["connectors", "rocketChat", "webhookUrls"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "Rocket.Chat webhook URL appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.connectors.rocketChat.webhookUrlEnv}/${config.connectors.rocketChat.webhookUrlsEnv} or .env.`
+    });
+  }
+
+  if (hasPath(configFile, ["connectors", "feishu", "webhookUrl"]) || hasPath(configFile, ["connectors", "feishu", "webhookUrls"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "Feishu webhook URL appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.connectors.feishu.webhookUrlEnv}/${config.connectors.feishu.webhookUrlsEnv} or .env.`
+    });
+  }
+
+  if (hasPath(configFile, ["connectors", "dingtalk", "webhookUrl"]) || hasPath(configFile, ["connectors", "dingtalk", "webhookUrls"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "DingTalk webhook URL appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.connectors.dingtalk.webhookUrlEnv}/${config.connectors.dingtalk.webhookUrlsEnv} or .env.`
+    });
+  }
+
+  if (hasPath(configFile, ["connectors", "wecom", "webhookUrl"]) || hasPath(configFile, ["connectors", "wecom", "webhookUrls"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "WeCom webhook URL appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.connectors.wecom.webhookUrlEnv}/${config.connectors.wecom.webhookUrlsEnv} or .env.`
+    });
+  }
+
+  if (hasPath(configFile, ["connectors", "zalo", "accessToken"]) || hasPath(configFile, ["connectors", "zalo", "recipient"]) || hasPath(configFile, ["connectors", "zalo", "recipients"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "Zalo OA token or recipient appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.connectors.zalo.accessTokenEnv}/${config.connectors.zalo.recipientEnv}/${config.connectors.zalo.recipientsEnv} or .env.`
+    });
+  }
+
+  if (hasPath(configFile, ["connectors", "irc", "host"]) || hasPath(configFile, ["connectors", "irc", "nick"]) || hasPath(configFile, ["connectors", "irc", "password"]) || hasPath(configFile, ["connectors", "irc", "channel"]) || hasPath(configFile, ["connectors", "irc", "channels"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "IRC host, password, nick, or channel appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.connectors.irc.hostEnv}/${config.connectors.irc.nickEnv}/${config.connectors.irc.passwordEnv}/${config.connectors.irc.channelEnv}/${config.connectors.irc.channelsEnv} or .env.`
+    });
+  }
+
+  if (hasPath(configFile, ["connectors", "twitch", "accessToken"]) || hasPath(configFile, ["connectors", "twitch", "botUsername"]) || hasPath(configFile, ["connectors", "twitch", "channel"]) || hasPath(configFile, ["connectors", "twitch", "channels"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "Twitch OAuth token, username, or channel appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.connectors.twitch.accessTokenEnv}/${config.connectors.twitch.botUsernameEnv}/${config.connectors.twitch.channelEnv}/${config.connectors.twitch.channelsEnv} or .env.`
+    });
+  }
+
+  const ntfyBaseUrl = getPathValue(configFile, ["connectors", "ntfy", "baseUrl"]);
+  const hasPrivateNtfyBaseUrl = typeof ntfyBaseUrl === "string" && normalizeNtfyBaseUrlForAudit(ntfyBaseUrl) !== "https://ntfy.sh";
+  if (hasPrivateNtfyBaseUrl || hasPath(configFile, ["connectors", "ntfy", "token"]) || hasPath(configFile, ["connectors", "ntfy", "topic"]) || hasPath(configFile, ["connectors", "ntfy", "topics"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "non-default ntfy base URL, token, or topic appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.connectors.ntfy.baseUrlEnv}/${config.connectors.ntfy.tokenEnv}/${config.connectors.ntfy.topicEnv}/${config.connectors.ntfy.topicsEnv} or .env.`
+    });
+  }
+
+  const hasDirectMastodonBaseUrl = hasPath(configFile, ["connectors", "mastodon", "baseUrl"]);
+  const hasDirectMastodonAccessToken = hasPath(configFile, ["connectors", "mastodon", "accessToken"]);
+  const hasDirectMastodonTargets = hasPath(configFile, ["connectors", "mastodon", "targets"]);
+  const hasDirectMastodonVisibility = hasPath(configFile, ["connectors", "mastodon", "visibility"]);
+  const hasActiveMastodonRoute = Boolean(
+    config.connectors.mastodon.enabled ||
+      config.connectors.mastodon.baseUrl ||
+      config.connectors.mastodon.accessToken ||
+      Object.keys(config.connectors.mastodon.targets).length ||
+      config.connectors.mastodon.allowedTargetIds.length ||
+      config.connectors.mastodon.defaultTargetIds.length
+  );
+  if (hasDirectMastodonBaseUrl || hasDirectMastodonAccessToken || hasDirectMastodonTargets || (hasDirectMastodonVisibility && hasActiveMastodonRoute)) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "Mastodon URL, access token, visibility, or target aliases appear to be stored directly in viser.config.json",
+      next: `Move it to ${config.connectors.mastodon.baseUrlEnv}/${config.connectors.mastodon.accessTokenEnv}/${config.connectors.mastodon.visibilityEnv}/${config.connectors.mastodon.targetsEnv} or .env.`
+    });
+  }
+
+  if (hasPath(configFile, ["connectors", "nextcloudTalk", "baseUrl"]) || hasPath(configFile, ["connectors", "nextcloudTalk", "username"]) || hasPath(configFile, ["connectors", "nextcloudTalk", "appPassword"]) || hasPath(configFile, ["connectors", "nextcloudTalk", "roomToken"]) || hasPath(configFile, ["connectors", "nextcloudTalk", "rooms"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "Nextcloud Talk URL, username, app password, or room token appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.connectors.nextcloudTalk.baseUrlEnv}/${config.connectors.nextcloudTalk.usernameEnv}/${config.connectors.nextcloudTalk.appPasswordEnv}/${config.connectors.nextcloudTalk.roomTokenEnv}/${config.connectors.nextcloudTalk.roomsEnv} or .env.`
+    });
+  }
+
+  if (hasPath(configFile, ["connectors", "webex", "accessToken"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "Webex token appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.connectors.webex.accessTokenEnv} or .env.`
+    });
+  }
+
+  if (hasPath(configFile, ["connectors", "zulip", "siteUrl"]) || hasPath(configFile, ["connectors", "zulip", "botEmail"]) || hasPath(configFile, ["connectors", "zulip", "apiKey"]) || hasPath(configFile, ["connectors", "zulip", "target"]) || hasPath(configFile, ["connectors", "zulip", "targets"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "Zulip credential or target appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.connectors.zulip.siteUrlEnv}/${config.connectors.zulip.botEmailEnv}/${config.connectors.zulip.apiKeyEnv}/${config.connectors.zulip.targetEnv}/${config.connectors.zulip.targetsEnv} or .env.`
+    });
+  }
+
+  if (hasPath(configFile, ["connectors", "email", "from"]) || hasPath(configFile, ["connectors", "email", "recipient"]) || hasPath(configFile, ["connectors", "email", "recipients"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "Email address or recipient alias appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.connectors.email.fromEnv}/${config.connectors.email.recipientEnv}/${config.connectors.email.recipientsEnv} or .env.`
+    });
+  }
+
+  if (hasPath(configFile, ["connectors", "github", "token"]) || hasPath(configFile, ["connectors", "github", "target"]) || hasPath(configFile, ["connectors", "github", "targets"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "GitHub token or issue target appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.connectors.github.tokenEnv}/${config.connectors.github.targetEnv}/${config.connectors.github.targetsEnv} or .env.`
+    });
+  }
+
+  if (hasPath(configFile, ["connectors", "todoist", "token"]) || hasPath(configFile, ["connectors", "todoist", "project"]) || hasPath(configFile, ["connectors", "todoist", "projects"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "Todoist token or project target appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.connectors.todoist.tokenEnv}/${config.connectors.todoist.projectEnv}/${config.connectors.todoist.projectsEnv} or .env.`
+    });
+  }
+
+  if (hasPath(configFile, ["tools", "webFetch", "firecrawlApiKey"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "Firecrawl web-fetch API key appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.tools.webFetch.firecrawlApiKeyEnv} or .env.`
+    });
+  }
+
+  if (hasPath(configFile, ["tools", "webSearch", "braveApiKey"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "Brave Search API key appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.tools.webSearch.braveApiKeyEnv} or .env.`
+    });
+  }
+
+  if (hasPath(configFile, ["tools", "webSearch", "tavilyApiKey"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "Tavily Search API key appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.tools.webSearch.tavilyApiKeyEnv} or .env.`
+    });
+  }
+
+  if (hasPath(configFile, ["tools", "webSearch", "perplexityApiKey"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "Perplexity Search API key appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.tools.webSearch.perplexityApiKeyEnv} or .env.`
+    });
+  }
+
+  if (hasPath(configFile, ["tools", "webSearch", "exaApiKey"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "Exa Search API key appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.tools.webSearch.exaApiKeyEnv} or .env.`
+    });
+  }
+
+  if (hasPath(configFile, ["tools", "webSearch", "firecrawlApiKey"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "Firecrawl Search API key appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.tools.webSearch.firecrawlApiKeyEnv} or .env.`
+    });
+  }
+
+  if (hasPath(configFile, ["tools", "webSearch", "ollamaApiKey"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "Ollama Web Search API key appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.tools.webSearch.ollamaApiKeyEnv} or .env.`
+    });
+  }
+
+  if (hasPath(configFile, ["actions", "browserTask", "browserUseApiKey"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "Browser Use API key appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.actions.browserTask.browserUseApiKeyEnv} or .env.`
+    });
+  }
+
+  if (hasPath(configFile, ["actions", "browserTask", "browserbaseApiKey"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "Browserbase API key appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.actions.browserTask.browserbaseApiKeyEnv} or .env.`
+    });
+  }
+
+  if (hasPath(configFile, ["actions", "browserTask", "firecrawlApiKey"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "Firecrawl browser-task API key appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.actions.browserTask.firecrawlApiKeyEnv} or .env.`
+    });
+  }
+
+  if (hasPath(configFile, ["connectors", "notion", "token"]) || hasPath(configFile, ["connectors", "notion", "page"]) || hasPath(configFile, ["connectors", "notion", "pages"])) {
+    items.push({
+      severity: "fail",
+      area: "secret",
+      message: "Notion token or page target appears to be stored directly in viser.config.json",
+      next: `Move it to ${config.connectors.notion.tokenEnv}/${config.connectors.notion.pageEnv}/${config.connectors.notion.pagesEnv} or .env.`
+    });
+  }
+}
+
+function hasConfiguredWebhook(config: { webhookUrl?: string; webhookUrls: Record<string, string> }): boolean {
+  return Boolean(config.webhookUrl || Object.keys(config.webhookUrls).length > 0);
+}
+
+function hasHomeAssistantCredentials(config: { baseUrl?: string; accessToken?: string; service?: string; services: Record<string, string> }): boolean {
+  return Boolean(config.baseUrl && config.accessToken && (config.service || Object.keys(config.services).length > 0));
+}
+
+function hasIrcCredentials(config: { host?: string; nick?: string; channel?: string; channels: Record<string, string> }): boolean {
+  return Boolean(config.host && config.nick && (config.channel || Object.keys(config.channels).length > 0));
+}
+
+function hasTwitchCredentials(config: { accessToken?: string; botUsername?: string; channel?: string; channels: Record<string, string> }): boolean {
+  return Boolean(config.accessToken && config.botUsername && (config.channel || Object.keys(config.channels).length > 0));
+}
+
+function hasNtfyTarget(config: { topic?: string; topics: Record<string, string> }): boolean {
+  return Boolean(config.topic || Object.keys(config.topics).length > 0);
+}
+
+function hasMastodonCredentials(config: { baseUrl?: string; accessToken?: string }): boolean {
+  return Boolean(config.baseUrl && config.accessToken);
+}
+
+function hasNextcloudTalkCredentials(config: { baseUrl?: string; username?: string; appPassword?: string; roomToken?: string; rooms: Record<string, string> }): boolean {
+  return Boolean(config.baseUrl && config.username && config.appPassword && (config.roomToken || Object.keys(config.rooms).length > 0));
+}
+
+function hasZulipCredentials(config: { siteUrl?: string; botEmail?: string; apiKey?: string }): boolean {
+  return Boolean(config.siteUrl && config.botEmail && config.apiKey);
+}
+
+function hasZaloCredentials(config: { accessToken?: string; recipient?: string; recipients: Record<string, string> }): boolean {
+  return Boolean(config.accessToken && (config.recipient || Object.keys(config.recipients).length > 0));
+}
+
+function hasZulipTarget(config: { target?: string; targets: Record<string, string> }): boolean {
+  return Boolean(config.target || Object.keys(config.targets).length > 0);
+}
+
+function hasEmailEnvelope(config: { recipient?: string; recipients: Record<string, string> }): boolean {
+  return Boolean(config.recipient || Object.keys(config.recipients).length > 0);
+}
+
+function hasGitHubCredentials(config: { token?: string; target?: string; targets: Record<string, string> }): boolean {
+  return Boolean(config.token && (config.target || Object.keys(config.targets).length > 0));
+}
+
+function hasTodoistCredentials(config: { token?: string }): boolean {
+  return Boolean(config.token);
+}
+
+function hasNotionCredentials(config: { token?: string; page?: string; pages: Record<string, string> }): boolean {
+  return Boolean(config.token && (config.page || Object.keys(config.pages).length > 0));
+}
+
+function hasObsidianTarget(config: { vaultDir?: string; note?: string; notes: Record<string, string> }): boolean {
+  return Boolean(config.vaultDir && (config.note || Object.keys(config.notes).length > 0));
 }
 
 async function auditActions(config: ViserConfig, items: AuditItem[]): Promise<void> {
@@ -750,6 +1626,122 @@ async function auditTools(config: ViserConfig, items: AuditItem[]): Promise<void
 
   if (config.tools.shell.enabled) {
     items.push(...await shellCommandAuditItems(config));
+  }
+
+  if (config.actions.browserTask.enabled && config.actions.browserTask.provider === "browser-use-cloud" && !config.actions.browserTask.browserUseApiKey?.trim()) {
+    items.push({
+      severity: "fail",
+      area: "actions",
+      message: "Browser Use cloud browser-task action is enabled without an API key",
+      next: `Set ${config.actions.browserTask.browserUseApiKeyEnv} in a private env file or disable actions.browserTask.enabled, or choose provider=local-cdp for localhost CDP automation.`
+    });
+  } else if (config.actions.browserTask.enabled && config.actions.browserTask.provider === "browser-use-cloud") {
+    items.push({ severity: "pass", area: "actions", message: "Browser Use cloud browser-task action has a redacted API key configured" });
+  } else if (config.actions.browserTask.enabled && config.actions.browserTask.provider === "local-cdp") {
+    items.push({ severity: "pass", area: "actions", message: "local CDP browser-task action uses a localhost DevTools endpoint and no cloud API key" });
+  } else if (config.actions.browserTask.enabled && config.actions.browserTask.provider === "browserbase-session" && !config.actions.browserTask.browserbaseApiKey?.trim()) {
+    items.push({
+      severity: "fail",
+      area: "actions",
+      message: "Browserbase session browser-task action is enabled without an API key",
+      next: `Set ${config.actions.browserTask.browserbaseApiKeyEnv} in a private env file or disable actions.browserTask.enabled.`
+    });
+  } else if (config.actions.browserTask.enabled && config.actions.browserTask.provider === "browserbase-session") {
+    items.push({ severity: "pass", area: "actions", message: "Browserbase session browser-task action has a redacted API key configured" });
+  } else if (config.actions.browserTask.enabled && config.actions.browserTask.provider === "firecrawl-interact" && !config.actions.browserTask.firecrawlApiKey?.trim()) {
+    items.push({
+      severity: "fail",
+      area: "actions",
+      message: "Firecrawl interact browser-task action is enabled without an API key",
+      next: `Set ${config.actions.browserTask.firecrawlApiKeyEnv} in a private env file or disable actions.browserTask.enabled.`
+    });
+  } else if (config.actions.browserTask.enabled && config.actions.browserTask.provider === "firecrawl-interact") {
+    items.push({ severity: "pass", area: "actions", message: "Firecrawl interact browser-task action has a redacted API key configured" });
+  } else {
+    items.push({ severity: "pass", area: "actions", message: "Browser task action is disabled by default" });
+  }
+
+  if (config.tools.webFetch.provider === "firecrawl-api" && !config.tools.webFetch.firecrawlApiKey?.trim()) {
+    items.push({
+      severity: "fail",
+      area: "tools",
+      message: "Firecrawl web-fetch provider is selected without an API key",
+      next: `Set ${config.tools.webFetch.firecrawlApiKeyEnv} in a private env file or choose direct-http.`
+    });
+  } else if (config.tools.webFetch.provider === "firecrawl-api") {
+    items.push({ severity: "pass", area: "tools", message: "Firecrawl web-fetch provider has a redacted API key configured" });
+  }
+
+  if (config.tools.webSearch.provider === "brave-api" && !config.tools.webSearch.braveApiKey?.trim()) {
+    items.push({
+      severity: "fail",
+      area: "tools",
+      message: "Brave web-search provider is selected without an API key",
+      next: `Set ${config.tools.webSearch.braveApiKeyEnv} in a private env file or choose duckduckgo-html/searxng-html/tavily-api/perplexity-api/exa-api/firecrawl-api/ollama-api.`
+    });
+  } else if (config.tools.webSearch.provider === "brave-api") {
+    items.push({ severity: "pass", area: "tools", message: "Brave web-search provider has a redacted API key configured" });
+  }
+
+  if (config.tools.webSearch.provider === "tavily-api" && !config.tools.webSearch.tavilyApiKey?.trim()) {
+    items.push({
+      severity: "fail",
+      area: "tools",
+      message: "Tavily web-search provider is selected without an API key",
+      next: `Set ${config.tools.webSearch.tavilyApiKeyEnv} in a private env file or choose duckduckgo-html/searxng-html/brave-api/perplexity-api/exa-api/firecrawl-api/ollama-api.`
+    });
+  } else if (config.tools.webSearch.provider === "tavily-api") {
+    items.push({ severity: "pass", area: "tools", message: "Tavily web-search provider has a redacted API key configured" });
+  }
+
+  if (config.tools.webSearch.provider === "perplexity-api" && !config.tools.webSearch.perplexityApiKey?.trim()) {
+    items.push({
+      severity: "fail",
+      area: "tools",
+      message: "Perplexity web-search provider is selected without an API key",
+      next: `Set ${config.tools.webSearch.perplexityApiKeyEnv} in a private env file or choose duckduckgo-html/searxng-html/brave-api/tavily-api/exa-api/firecrawl-api/ollama-api.`
+    });
+  } else if (config.tools.webSearch.provider === "perplexity-api") {
+    items.push({ severity: "pass", area: "tools", message: "Perplexity web-search provider has a redacted API key configured" });
+  }
+
+  if (config.tools.webSearch.provider === "exa-api" && !config.tools.webSearch.exaApiKey?.trim()) {
+    items.push({
+      severity: "fail",
+      area: "tools",
+      message: "Exa web-search provider is selected without an API key",
+      next: `Set ${config.tools.webSearch.exaApiKeyEnv} in a private env file or choose duckduckgo-html/searxng-html/brave-api/tavily-api/perplexity-api/firecrawl-api/ollama-api.`
+    });
+  } else if (config.tools.webSearch.provider === "exa-api") {
+    items.push({ severity: "pass", area: "tools", message: "Exa web-search provider has a redacted API key configured" });
+  }
+
+  if (config.tools.webSearch.provider === "firecrawl-api" && !config.tools.webSearch.firecrawlApiKey?.trim()) {
+    items.push({
+      severity: "fail",
+      area: "tools",
+      message: "Firecrawl web-search provider is selected without an API key",
+      next: `Set ${config.tools.webSearch.firecrawlApiKeyEnv} in a private env file or choose duckduckgo-html/searxng-html/brave-api/tavily-api/perplexity-api/exa-api/ollama-api.`
+    });
+  } else if (config.tools.webSearch.provider === "firecrawl-api") {
+    items.push({ severity: "pass", area: "tools", message: "Firecrawl web-search provider has a redacted API key configured" });
+  }
+
+  if (config.tools.webSearch.provider === "ollama-api" && isHostedOllamaBaseUrlForAudit(config.tools.webSearch.ollamaBaseUrl) && !config.tools.webSearch.ollamaApiKey?.trim()) {
+    items.push({
+      severity: "fail",
+      area: "tools",
+      message: "Hosted Ollama web-search provider is selected without an API key",
+      next: `Set ${config.tools.webSearch.ollamaApiKeyEnv} in a private env file or point ollamaBaseUrl at a signed-in local daemon.`
+    });
+  } else if (config.tools.webSearch.provider === "ollama-api") {
+    items.push({
+      severity: "pass",
+      area: "tools",
+      message: isHostedOllamaBaseUrlForAudit(config.tools.webSearch.ollamaBaseUrl)
+        ? "Hosted Ollama web-search provider has a redacted API key configured"
+        : "Local Ollama web-search provider uses the configured daemon without a model API key"
+    });
   }
 
   for (const root of config.tools.allowedReadRoots) {
@@ -882,14 +1874,18 @@ async function inspectShellCommandPath(commandPath: string, nofollowRoot: string
 }
 
 function auditStorage(config: ViserConfig, items: AuditItem[]): void {
-  for (const [area, path] of [
+  const statePaths: Array<readonly [string, string]> = [
     ["storage", config.storage.dir],
     ["memory", config.memory.dir],
+    ["personalization", config.personalization.dir],
     ["scheduler", config.scheduler.dir],
     ["jobs", config.jobs.dir],
     ["access", config.access.dir],
     ["actions", config.actions.dir]
-  ] as const) {
+  ];
+  if (config.webDashboard.enabled) statePaths.push(["web-dashboard", config.webDashboard.canvasDir]);
+
+  for (const [area, path] of statePaths) {
     const root = resolve(path);
     const projectRoot = resolve(config.assistant.workdir || cwd());
     const rel = relative(projectRoot, root);
@@ -904,6 +1900,47 @@ function auditStorage(config: ViserConfig, items: AuditItem[]): void {
       items.push({ severity: "pass", area, message: `${area} path stays under assistant workdir` });
     }
   }
+}
+
+function auditWebDashboard(config: ViserConfig, items: AuditItem[]): void {
+  if (!config.webDashboard.enabled) return;
+  const remoteHost = !LOCAL_DASHBOARD_HOSTS.has(config.webDashboard.host);
+  if (!remoteHost) {
+    items.push({
+      severity: "pass",
+      area: "web-dashboard",
+      message: config.webDashboard.authToken
+        ? "localhost dashboard has optional token authentication configured"
+        : "dashboard is bound to localhost"
+    });
+    return;
+  }
+
+  if (!config.webDashboard.allowRemote) {
+    items.push({
+      severity: "fail",
+      area: "web-dashboard",
+      message: "non-local dashboard host is configured without allowRemote",
+      next: "Keep webDashboard.host on localhost or explicitly set allowRemote=true with a strong token."
+    });
+    return;
+  }
+
+  if (!config.webDashboard.authToken || config.webDashboard.authToken.length < 16) {
+    items.push({
+      severity: "fail",
+      area: "web-dashboard",
+      message: "remote dashboard is missing a strong auth token",
+      next: `Set ${config.webDashboard.authTokenEnv || "VISER_DASHBOARD_TOKEN"} before exposing dashboard routes outside localhost.`
+    });
+    return;
+  }
+
+  items.push({
+    severity: "pass",
+    area: "web-dashboard",
+    message: "remote dashboard requires token authentication"
+  });
 }
 
 function auditScheduler(config: ViserConfig, items: AuditItem[]): void {
@@ -1251,11 +2288,41 @@ function hasPath(value: unknown, path: string[]): boolean {
     if (typeof current !== "object" || current === null || !(key in current)) return false;
     current = (current as Record<string, unknown>)[key];
   }
-  return current !== undefined && current !== null && current !== "";
+  if (current === undefined || current === null || current === "") return false;
+  if (Array.isArray(current)) return current.length > 0;
+  if (typeof current === "object") return Object.keys(current).length > 0;
+  return true;
+}
+
+function getPathValue(value: unknown, path: string[]): unknown {
+  let current = value;
+  for (const key of path) {
+    if (typeof current !== "object" || current === null || !(key in current)) return undefined;
+    current = (current as Record<string, unknown>)[key];
+  }
+  return current;
+}
+
+function normalizeNtfyBaseUrlForAudit(value: string): string {
+  return value.trim().replace(/\/+$/u, "");
+}
+
+function isHostedOllamaBaseUrlForAudit(value: string | undefined): boolean {
+  if (!value?.trim()) return false;
+  try {
+    return new URL(value.trim()).hostname.toLowerCase().replace(/\.$/u, "") === "ollama.com";
+  } catch {
+    return false;
+  }
 }
 
 function looksSecretLike(key: string): boolean {
   return /token|secret|key|password|credential/i.test(key);
+}
+
+function isStrongSharedSecret(value: string | undefined): boolean {
+  const token = value?.trim() ?? "";
+  return token.length >= 24 && token.length <= 512 && !/[\s\r\n\x00-\x1f\x7f]/u.test(token);
 }
 
 function displayPath(path: string): string {

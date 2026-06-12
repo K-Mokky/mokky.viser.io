@@ -87,8 +87,8 @@ test("providerGuideReport classifies sandbox and permission failures", async () 
   assert.match(report, /Viser probe: fail/);
   assert.match(report, /detected issue: sandbox\/permission failure/);
   assert.match(report, /manual smoke test:/);
-  assert.match(report, /node src\/index.ts verify --live --probe-all-providers/);
-  assert.match(report, /node src\/index.ts launch-status/);
+  assert.match(report, /viser verify --live --probe-all-providers/);
+  assert.match(report, /viser launch-status/);
 });
 
 test("providerGuideReport classifies interactive login prompts", async () => {

@@ -31,6 +31,24 @@ test("runCommand caps stdout and stderr capture", async () => {
   assert.equal(result.maxOutputBytes, 4);
 });
 
+test("runCommand streams only captured stdout and stderr chunks", async () => {
+  const stdoutChunks: string[] = [];
+  const stderrChunks: string[] = [];
+  const result = await runCommand({
+    command: "node",
+    args: ["-e", "process.stdout.write('abcdef'); process.stderr.write('uvwxyz');"],
+    timeoutMs: 5000,
+    maxOutputBytes: 4,
+    onStdoutChunk: (chunk) => stdoutChunks.push(chunk),
+    onStderrChunk: (chunk) => stderrChunks.push(chunk)
+  });
+
+  assert.equal(result.stdout, "abcd");
+  assert.equal(result.stderr, "uvwx");
+  assert.equal(stdoutChunks.join(""), "abcd");
+  assert.equal(stderrChunks.join(""), "uvwx");
+});
+
 test("runCommand can run without inheriting process env", async () => {
   const oldValue = process.env.VISER_EXEC_TEST_TOKEN;
   process.env.VISER_EXEC_TEST_TOKEN = "shell-secret-value";
@@ -48,6 +66,17 @@ test("runCommand can run without inheriting process env", async () => {
     if (oldValue === undefined) delete process.env.VISER_EXEC_TEST_TOKEN;
     else process.env.VISER_EXEC_TEST_TOKEN = oldValue;
   }
+});
+
+test("runCommand tolerates commands that exit before reading stdin", async () => {
+  const result = await runCommand({
+    command: process.execPath,
+    args: ["-e", "process.exit(0)"],
+    stdin: "x".repeat(5_000_000),
+    timeoutMs: 5000
+  });
+
+  assert.equal(result.exitCode, 0);
 });
 
 test("commandExists rejects executable directories as commands", async () => {

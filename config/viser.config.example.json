@@ -20,6 +20,12 @@
     "dir": ".viser/memory",
     "promptLimit": 12
   },
+  "personalization": {
+    "enabled": true,
+    "dir": ".viser/personalization",
+    "promptLimit": 12,
+    "maxValueChars": 1000
+  },
   "skills": {
     "enabled": true,
     "dirs": [
@@ -56,6 +62,33 @@
         "git"
       ],
       "timeoutMs": 30000
+    },
+    "webFetch": {
+      "enabled": true,
+      "provider": "direct-http",
+      "extractMode": "text",
+      "firecrawlApiKeyEnv": "FIRECRAWL_API_KEY",
+      "maxResponseBytes": 1000000,
+      "timeoutMs": 15000,
+      "maxRedirects": 3,
+      "cacheTtlMs": 900000,
+      "userAgent": "Viser/0.1 web-fetch (+https://github.com/KMokky/viser)"
+    },
+    "webSearch": {
+      "enabled": true,
+      "provider": "duckduckgo-html",
+      "searxngBaseUrl": "https://searxng.example.com",
+      "braveApiKeyEnv": "BRAVE_SEARCH_API_KEY",
+      "tavilyApiKeyEnv": "TAVILY_API_KEY",
+      "perplexityApiKeyEnv": "PERPLEXITY_API_KEY",
+      "exaApiKeyEnv": "EXA_API_KEY",
+      "firecrawlApiKeyEnv": "FIRECRAWL_API_KEY",
+      "ollamaBaseUrl": "http://127.0.0.1:11434",
+      "ollamaApiKeyEnv": "OLLAMA_API_KEY",
+      "maxResults": 5,
+      "maxResponseBytes": 500000,
+      "timeoutMs": 15000,
+      "userAgent": "Viser/0.1 web-search (+https://github.com/KMokky/viser)"
     }
   },
   "scheduler": {
@@ -82,7 +115,32 @@
       "."
     ],
     "maxWriteBytes": 50000,
-    "createBackups": true
+    "createBackups": true,
+    "browserTask": {
+      "enabled": false,
+      "provider": "browser-use-cloud",
+      "browserUseBaseUrl": "https://api.browser-use.com",
+      "browserUseApiKeyEnv": "BROWSER_USE_API_KEY",
+      "browserbaseBaseUrl": "https://api.browserbase.com",
+      "browserbaseApiKeyEnv": "BROWSERBASE_API_KEY",
+      "browserbaseProjectIdEnv": "BROWSERBASE_PROJECT_ID",
+      "browserbaseSessionTimeoutSeconds": 60,
+      "browserbaseReleaseSession": true,
+      "firecrawlBaseUrl": "https://api.firecrawl.dev",
+      "firecrawlApiKeyEnv": "FIRECRAWL_API_KEY",
+      "firecrawlInteractTimeoutSeconds": 30,
+      "firecrawlStopSession": true,
+      "firecrawlMaxResultChars": 6000,
+      "maxTaskChars": 4000,
+      "maxAgentSteps": 25,
+      "allowedDomains": [],
+      "timeoutMs": 30000,
+      "localCdpBaseUrl": "http://127.0.0.1:9222",
+      "localCdpBaseUrlEnv": "VISER_BROWSER_CDP_URL",
+      "localCdpWaitMs": 1500,
+      "localCdpMaxContentChars": 6000,
+      "localCdpCloseTab": true
+    }
   },
   "connectors": {
     "telegram": {
@@ -101,6 +159,340 @@
       "defaultChannelIds": [],
       "maxMessagesPerMinute": 20,
       "maxInputChars": 4000
+    },
+    "slack": {
+      "enabled": false,
+      "botTokenEnv": "SLACK_BOT_TOKEN",
+      "appTokenEnv": "SLACK_APP_TOKEN",
+      "botUserIdEnv": "SLACK_BOT_USER_ID",
+      "prefix": "!viser",
+      "allowedChannelIds": [],
+      "defaultChannelIds": [],
+      "maxMessagesPerMinute": 20,
+      "maxInputChars": 4000
+    },
+    "matrix": {
+      "enabled": false,
+      "homeserverUrlEnv": "MATRIX_HOMESERVER_URL",
+      "accessTokenEnv": "MATRIX_ACCESS_TOKEN",
+      "userIdEnv": "MATRIX_USER_ID",
+      "prefix": "!viser",
+      "allowedRoomIds": [],
+      "defaultRoomIds": [],
+      "maxMessagesPerMinute": 20,
+      "maxInputChars": 4000,
+      "pollTimeoutMs": 30000
+    },
+    "signal": {
+      "enabled": false,
+      "commandEnv": "SIGNAL_CLI_COMMAND",
+      "command": "signal-cli",
+      "accountEnv": "SIGNAL_CLI_ACCOUNT",
+      "allowedRecipientIds": [],
+      "defaultRecipientIds": [],
+      "maxMessagesPerMinute": 20,
+      "maxInputChars": 4000,
+      "pollIntervalMs": 5000,
+      "receiveTimeoutMs": 30000,
+      "sendTimeoutMs": 30000
+    },
+    "imessage": {
+      "enabled": false,
+      "sqliteCommandEnv": "IMESSAGE_SQLITE_COMMAND",
+      "sqliteCommand": "sqlite3",
+      "osascriptCommandEnv": "IMESSAGE_OSASCRIPT_COMMAND",
+      "osascriptCommand": "osascript",
+      "chatDbPathEnv": "IMESSAGE_CHAT_DB",
+      "chatDbPath": "~/Library/Messages/chat.db",
+      "allowedHandleIds": [],
+      "defaultHandleIds": [],
+      "maxMessagesPerMinute": 20,
+      "maxInputChars": 4000,
+      "pollIntervalMs": 5000,
+      "queryTimeoutMs": 30000,
+      "sendTimeoutMs": 30000
+    },
+    "whatsapp": {
+      "enabled": false,
+      "accessTokenEnv": "WHATSAPP_ACCESS_TOKEN",
+      "phoneNumberIdEnv": "WHATSAPP_PHONE_NUMBER_ID",
+      "verifyTokenEnv": "WHATSAPP_VERIFY_TOKEN",
+      "graphApiVersionEnv": "WHATSAPP_GRAPH_API_VERSION",
+      "graphApiVersion": "v18.0",
+      "webhookHost": "127.0.0.1",
+      "webhookPort": 8788,
+      "webhookPath": "/whatsapp/webhook",
+      "allowedRecipientIds": [],
+      "defaultRecipientIds": [],
+      "maxMessagesPerMinute": 20,
+      "maxInputChars": 4000,
+      "sendTimeoutMs": 30000
+    },
+    "line": {
+      "enabled": false,
+      "channelAccessTokenEnv": "LINE_CHANNEL_ACCESS_TOKEN",
+      "channelSecretEnv": "LINE_CHANNEL_SECRET",
+      "webhookHost": "127.0.0.1",
+      "webhookPort": 8789,
+      "webhookPath": "/line/webhook",
+      "allowedPeerIds": [],
+      "defaultPeerIds": [],
+      "maxMessagesPerMinute": 20,
+      "maxInputChars": 4000,
+      "sendTimeoutMs": 30000
+    },
+    "kakaotalk": {
+      "enabled": false,
+      "requestTokenEnv": "KAKAOTALK_SKILL_TOKEN",
+      "webhookHost": "127.0.0.1",
+      "webhookPort": 8790,
+      "webhookPath": "/kakaotalk/skill",
+      "allowedUserIds": [],
+      "defaultUserIds": [],
+      "maxMessagesPerMinute": 20,
+      "maxInputChars": 4000
+    },
+    "googleChat": {
+      "enabled": false,
+      "webhookUrlEnv": "GOOGLE_CHAT_WEBHOOK_URL",
+      "webhookUrlsEnv": "GOOGLE_CHAT_WEBHOOKS",
+      "webhookUrls": {},
+      "allowedWebhookIds": [],
+      "defaultWebhookIds": [],
+      "sendTimeoutMs": 30000
+    },
+    "webhook": {
+      "enabled": false,
+      "webhookUrlEnv": "VISER_WEBHOOK_URL",
+      "webhookUrlsEnv": "VISER_WEBHOOKS",
+      "webhookUrls": {},
+      "inboundEnabled": false,
+      "inboundTokenEnv": "VISER_WEBHOOK_INBOUND_TOKEN",
+      "inboundSignatureSecretEnv": "VISER_WEBHOOK_INBOUND_SIGNATURE_SECRET",
+      "inboundSignatureToleranceMs": 300000,
+      "inboundPath": "/webhook/viser",
+      "inboundMaxInputChars": 4000,
+      "allowedWebhookIds": [],
+      "defaultWebhookIds": [],
+      "sendTimeoutMs": 30000
+    },
+    "homeAssistant": {
+      "enabled": false,
+      "baseUrlEnv": "HOME_ASSISTANT_BASE_URL",
+      "accessTokenEnv": "HOME_ASSISTANT_ACCESS_TOKEN",
+      "serviceEnv": "HOME_ASSISTANT_SERVICE",
+      "servicesEnv": "HOME_ASSISTANT_SERVICES",
+      "services": {},
+      "allowedServiceIds": [],
+      "defaultServiceIds": [],
+      "sendTimeoutMs": 30000
+    },
+    "teams": {
+      "enabled": false,
+      "webhookUrlEnv": "TEAMS_WEBHOOK_URL",
+      "webhookUrlsEnv": "TEAMS_WEBHOOKS",
+      "webhookUrls": {},
+      "allowedWebhookIds": [],
+      "defaultWebhookIds": [],
+      "sendTimeoutMs": 30000
+    },
+    "mattermost": {
+      "enabled": false,
+      "webhookUrlEnv": "MATTERMOST_WEBHOOK_URL",
+      "webhookUrlsEnv": "MATTERMOST_WEBHOOKS",
+      "webhookUrls": {},
+      "allowedWebhookIds": [],
+      "defaultWebhookIds": [],
+      "sendTimeoutMs": 30000
+    },
+    "synologyChat": {
+      "enabled": false,
+      "webhookUrlEnv": "SYNOLOGY_CHAT_WEBHOOK_URL",
+      "webhookUrlsEnv": "SYNOLOGY_CHAT_WEBHOOKS",
+      "webhookUrls": {},
+      "allowedWebhookIds": [],
+      "defaultWebhookIds": [],
+      "sendTimeoutMs": 30000
+    },
+    "rocketChat": {
+      "enabled": false,
+      "webhookUrlEnv": "ROCKET_CHAT_WEBHOOK_URL",
+      "webhookUrlsEnv": "ROCKET_CHAT_WEBHOOKS",
+      "webhookUrls": {},
+      "allowedWebhookIds": [],
+      "defaultWebhookIds": [],
+      "sendTimeoutMs": 30000
+    },
+    "feishu": {
+      "enabled": false,
+      "webhookUrlEnv": "FEISHU_WEBHOOK_URL",
+      "webhookUrlsEnv": "FEISHU_WEBHOOKS",
+      "webhookUrls": {},
+      "allowedWebhookIds": [],
+      "defaultWebhookIds": [],
+      "sendTimeoutMs": 30000
+    },
+    "dingtalk": {
+      "enabled": false,
+      "webhookUrlEnv": "DINGTALK_WEBHOOK_URL",
+      "webhookUrlsEnv": "DINGTALK_WEBHOOKS",
+      "webhookUrls": {},
+      "allowedWebhookIds": [],
+      "defaultWebhookIds": [],
+      "sendTimeoutMs": 30000
+    },
+    "wecom": {
+      "enabled": false,
+      "webhookUrlEnv": "WECOM_WEBHOOK_URL",
+      "webhookUrlsEnv": "WECOM_WEBHOOKS",
+      "webhookUrls": {},
+      "allowedWebhookIds": [],
+      "defaultWebhookIds": [],
+      "sendTimeoutMs": 30000
+    },
+    "zalo": {
+      "enabled": false,
+      "accessTokenEnv": "ZALO_OA_ACCESS_TOKEN",
+      "recipientEnv": "ZALO_RECIPIENT_ID",
+      "recipientsEnv": "ZALO_RECIPIENTS",
+      "recipients": {},
+      "allowedRecipientIds": [],
+      "defaultRecipientIds": [],
+      "sendTimeoutMs": 30000
+    },
+    "irc": {
+      "enabled": false,
+      "hostEnv": "IRC_HOST",
+      "portEnv": "IRC_PORT",
+      "port": 6697,
+      "tlsEnv": "IRC_TLS",
+      "tls": true,
+      "nickEnv": "IRC_NICK",
+      "passwordEnv": "IRC_PASSWORD",
+      "channelEnv": "IRC_CHANNEL",
+      "channelsEnv": "IRC_CHANNELS",
+      "channels": {},
+      "allowedChannelIds": [],
+      "defaultChannelIds": [],
+      "sendTimeoutMs": 30000
+    },
+    "twitch": {
+      "enabled": false,
+      "accessTokenEnv": "TWITCH_ACCESS_TOKEN",
+      "botUsernameEnv": "TWITCH_BOT_USERNAME",
+      "channelEnv": "TWITCH_CHANNEL",
+      "channelsEnv": "TWITCH_CHANNELS",
+      "channels": {},
+      "allowedChannelIds": [],
+      "defaultChannelIds": [],
+      "sendTimeoutMs": 30000
+    },
+    "ntfy": {
+      "enabled": false,
+      "baseUrlEnv": "NTFY_BASE_URL",
+      "baseUrl": "https://ntfy.sh",
+      "tokenEnv": "NTFY_TOKEN",
+      "topicEnv": "NTFY_TOPIC",
+      "topicsEnv": "NTFY_TOPICS",
+      "topics": {},
+      "allowedTopicIds": [],
+      "defaultTopicIds": [],
+      "sendTimeoutMs": 30000
+    },
+    "mastodon": {
+      "enabled": false,
+      "baseUrlEnv": "MASTODON_BASE_URL",
+      "accessTokenEnv": "MASTODON_ACCESS_TOKEN",
+      "visibilityEnv": "MASTODON_VISIBILITY",
+      "visibility": "private",
+      "targetsEnv": "MASTODON_TARGETS",
+      "targets": {},
+      "allowedTargetIds": [],
+      "defaultTargetIds": [],
+      "sendTimeoutMs": 30000
+    },
+    "nextcloudTalk": {
+      "enabled": false,
+      "baseUrlEnv": "NEXTCLOUD_TALK_BASE_URL",
+      "usernameEnv": "NEXTCLOUD_TALK_USERNAME",
+      "appPasswordEnv": "NEXTCLOUD_TALK_APP_PASSWORD",
+      "roomTokenEnv": "NEXTCLOUD_TALK_ROOM_TOKEN",
+      "roomsEnv": "NEXTCLOUD_TALK_ROOMS",
+      "rooms": {},
+      "allowedRoomIds": [],
+      "defaultRoomIds": [],
+      "sendTimeoutMs": 30000
+    },
+    "webex": {
+      "enabled": false,
+      "accessTokenEnv": "WEBEX_ACCESS_TOKEN",
+      "allowedRoomIds": [],
+      "defaultRoomIds": [],
+      "sendTimeoutMs": 30000
+    },
+    "zulip": {
+      "enabled": false,
+      "siteUrlEnv": "ZULIP_SITE_URL",
+      "botEmailEnv": "ZULIP_BOT_EMAIL",
+      "apiKeyEnv": "ZULIP_API_KEY",
+      "targetEnv": "ZULIP_TARGET",
+      "targetsEnv": "ZULIP_TARGETS",
+      "targets": {},
+      "allowedTargetIds": [],
+      "defaultTargetIds": [],
+      "sendTimeoutMs": 30000
+    },
+    "email": {
+      "enabled": false,
+      "sendmailCommandEnv": "EMAIL_SENDMAIL_COMMAND",
+      "sendmailCommand": "sendmail",
+      "fromEnv": "EMAIL_FROM",
+      "recipientEnv": "EMAIL_RECIPIENT",
+      "recipientsEnv": "EMAIL_RECIPIENTS",
+      "recipients": {},
+      "allowedRecipientIds": [],
+      "defaultRecipientIds": [],
+      "sendTimeoutMs": 30000
+    },
+    "github": {
+      "enabled": false,
+      "tokenEnv": "GITHUB_TOKEN",
+      "targetEnv": "GITHUB_ISSUE_TARGET",
+      "targetsEnv": "GITHUB_ISSUE_TARGETS",
+      "targets": {},
+      "allowedTargetIds": [],
+      "defaultTargetIds": [],
+      "sendTimeoutMs": 30000
+    },
+    "todoist": {
+      "enabled": false,
+      "tokenEnv": "TODOIST_API_TOKEN",
+      "projectEnv": "TODOIST_PROJECT_ID",
+      "projectsEnv": "TODOIST_PROJECTS",
+      "projects": {},
+      "allowedProjectIds": [],
+      "defaultProjectIds": [],
+      "sendTimeoutMs": 30000
+    },
+    "notion": {
+      "enabled": false,
+      "tokenEnv": "NOTION_TOKEN",
+      "pageEnv": "NOTION_PAGE_ID",
+      "pagesEnv": "NOTION_PAGES",
+      "pages": {},
+      "allowedPageIds": [],
+      "defaultPageIds": [],
+      "sendTimeoutMs": 30000
+    },
+    "obsidian": {
+      "enabled": false,
+      "vaultDirEnv": "OBSIDIAN_VAULT_DIR",
+      "noteEnv": "OBSIDIAN_NOTE",
+      "notesEnv": "OBSIDIAN_NOTES",
+      "notes": {},
+      "allowedNoteIds": [],
+      "defaultNoteIds": [],
+      "maxMessageChars": 20000
     }
   },
   "providers": {
@@ -164,6 +556,9 @@
   "webDashboard": {
     "enabled": false,
     "host": "127.0.0.1",
-    "port": 8787
+    "port": 8787,
+    "canvasDir": ".viser/dashboard",
+    "allowRemote": false,
+    "authTokenEnv": "VISER_DASHBOARD_TOKEN"
   }
 }

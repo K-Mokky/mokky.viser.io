@@ -18,6 +18,8 @@ export interface RunCommandOptions {
   timeoutMs: number;
   maxOutputBytes?: number;
   abortOnOutputPatterns?: RegExp[];
+  onStdoutChunk?: (chunk: string) => void;
+  onStderrChunk?: (chunk: string) => void;
 }
 
 export interface RunCommandResult {
@@ -68,15 +70,25 @@ export async function runCommand(options: RunCommandOptions): Promise<RunCommand
     timeout.unref();
 
     child.stdout.on("data", (chunk: Buffer) => {
-      stdoutLimit.push(chunk);
+      const captured = stdoutLimit.push(chunk);
+      if (captured.length > 0) options.onStdoutChunk?.(captured.toString("utf8"));
       abortIfMatched(chunk.toString("utf8"));
     });
     child.stderr.on("data", (chunk: Buffer) => {
-      stderrLimit.push(chunk);
+      const captured = stderrLimit.push(chunk);
+      if (captured.length > 0) options.onStderrChunk?.(captured.toString("utf8"));
       abortIfMatched(chunk.toString("utf8"));
     });
 
     child.on("error", (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      reject(error);
+    });
+
+    child.stdin.on("error", (error: NodeJS.ErrnoException) => {
+      if (isBenignStdinClose(error)) return;
       if (settled) return;
       settled = true;
       clearTimeout(timeout);
@@ -105,6 +117,10 @@ export async function runCommand(options: RunCommandOptions): Promise<RunCommand
   });
 }
 
+function isBenignStdinClose(error: NodeJS.ErrnoException): boolean {
+  return error.code === "EPIPE" || error.code === "ERR_STREAM_DESTROYED";
+}
+
 function commandEnv(options: RunCommandOptions): NodeJS.ProcessEnv {
   const output: NodeJS.ProcessEnv = options.inheritEnv === false ? {} : { ...process.env };
   for (const [key, value] of Object.entries(options.env ?? {})) {
@@ -114,7 +130,7 @@ function commandEnv(options: RunCommandOptions): NodeJS.ProcessEnv {
   return output;
 }
 
-function createOutputLimiter(buffers: Buffer[], maxBytes: number): { push: (chunk: Buffer) => void; truncated: () => boolean } {
+function createOutputLimiter(buffers: Buffer[], maxBytes: number): { push: (chunk: Buffer) => Buffer; truncated: () => boolean } {
   let capturedBytes = 0;
   let truncated = false;
 
@@ -122,19 +138,21 @@ function createOutputLimiter(buffers: Buffer[], maxBytes: number): { push: (chun
     push(chunk) {
       if (capturedBytes >= maxBytes) {
         truncated = true;
-        return;
+        return Buffer.alloc(0);
       }
 
       const remaining = maxBytes - capturedBytes;
       if (chunk.length <= remaining) {
         buffers.push(chunk);
         capturedBytes += chunk.length;
-        return;
+        return chunk;
       }
 
-      buffers.push(chunk.subarray(0, remaining));
+      const captured = chunk.subarray(0, remaining);
+      buffers.push(captured);
       capturedBytes = maxBytes;
       truncated = true;
+      return captured;
     },
     truncated: () => truncated
   };

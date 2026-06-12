@@ -28,12 +28,14 @@ export interface VerifyResult {
 }
 
 export async function verify(config: ViserConfig, options: VerifyOptions = {}): Promise<VerifyResult> {
-  const readiness = await readinessItems(config, {
-    live: options.live,
-    probeProviders: options.probeProviders,
-    probeAllProviders: options.probeAllProviders
-  });
-  const audit = await auditItems(config);
+  const [readiness, audit] = await Promise.all([
+    readinessItems(config, {
+      live: options.live,
+      probeProviders: options.probeProviders,
+      probeAllProviders: options.probeAllProviders
+    }),
+    auditItems(config)
+  ]);
   const smoke = await localSmoke(config);
   const readinessSummary = summarizeReadiness(readiness);
   const auditSummary = summarizeAudit(audit);
@@ -133,37 +135,37 @@ function providerIdFromProbeMessage(message: string): string | undefined {
 function recommendedCommands(readiness: ReadinessItem[], audit: AuditItem[]): string[] {
   const commands = new Set<string>();
 
-  commands.add("node src/index.ts config-check");
-  commands.add("node src/index.ts state-check");
-  commands.add("node src/index.ts audit");
-  commands.add("node src/index.ts readiness");
-  commands.add("node src/index.ts smoke");
-  commands.add("node src/index.ts preflight");
-  commands.add("node src/index.ts preflight --live --probe-all-providers");
-  commands.add("node src/index.ts launch-status");
-  commands.add("node src/index.ts next-steps --live --probe-all-providers");
-  commands.add("node src/index.ts gateway --dry-run");
-  commands.add("node src/index.ts gateway --dry-run --strict");
-  commands.add("node src/index.ts gateway --dry-run --strict --live --probe-all-providers");
-  commands.add("node src/index.ts gateway");
+  commands.add("viser config-check");
+  commands.add("viser state-check");
+  commands.add("viser audit");
+  commands.add("viser readiness");
+  commands.add("viser smoke");
+  commands.add("viser benchmark");
+  commands.add("viser preflight");
+  commands.add("viser preflight --live --probe-all-providers");
+  commands.add("viser launch-status");
+  commands.add("viser next-steps --live --probe-all-providers");
+  commands.add("viser gateway --dry-run");
+  commands.add("viser gateway --dry-run --strict");
+  commands.add("viser gateway --dry-run --strict --live --probe-all-providers");
+  commands.add("viser gateway");
 
   if (readiness.some((item) => (item.area === "provider-probe" || item.area === "provider-runtime") && item.status !== "pass")) {
-    commands.add("node src/index.ts provider-guide --probe");
+    commands.add("viser provider-guide --probe");
   } else {
-    commands.add("node src/index.ts provider-guide");
+    commands.add("viser provider-guide");
   }
 
-  if (readiness.some((item) => item.area === "telegram" || item.area === "discord" || item.area === "live")) {
-    commands.add("node src/index.ts pair-code telegram|discord");
+  if (readiness.some((item) => item.area === "telegram" || item.area === "discord" || item.area === "slack" || item.area === "matrix" || item.area === "signal" || item.area === "imessage" || item.area === "whatsapp" || item.area === "line" || item.area === "google-chat" || item.area === "webhook" || item.area === "home-assistant" || item.area === "teams" || item.area === "mattermost" || item.area === "synology-chat" || item.area === "rocket-chat" || item.area === "feishu" || item.area === "dingtalk" || item.area === "wecom" || item.area === "zalo" || item.area === "irc" || item.area === "twitch" || item.area === "nextcloud-talk" || item.area === "webex" || item.area === "zulip" || item.area === "email" || item.area === "github" || item.area === "todoist" || item.area === "notion" || item.area === "obsidian" || item.area === "live")) {
+    commands.add("viser pair-code telegram|discord|slack|matrix|signal|imessage|whatsapp|line|google-chat|webhook|home-assistant|teams|mattermost|synology-chat|rocket-chat|feishu|dingtalk|wecom|zalo|irc|twitch|ntfy|mastodon|nextcloud-talk|webex|zulip|email|github|todoist|notion|obsidian");
   }
 
   if (audit.some((item) => item.severity !== "pass")) {
-    commands.add("edit viser.config.json, then rerun node src/index.ts audit");
+    commands.add("edit viser.config.json, then rerun viser audit");
   }
 
-  commands.add("node src/index.ts gateway --strict --live --probe-all-providers");
-  commands.add("node src/index.ts service-run --live --probe-all-providers");
-  commands.add("node src/index.ts backup");
-  commands.add("node src/index.ts release-evidence");
+  commands.add("viser gateway --strict --live --probe-all-providers");
+  commands.add("viser backup");
+  commands.add("viser release-evidence");
   return [...commands];
 }

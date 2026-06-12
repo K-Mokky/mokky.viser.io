@@ -14,16 +14,24 @@ import {
   readPrivateFileIfExists,
   writePrivateFile
 } from "../utils/files.ts";
-import { normalizeClipboardText, normalizeExternalUrl, normalizeSpeechText, parseCalendarEventContent, parseConnectorMessageContent, parseDesktopNotificationContent, parseMailDraftContent } from "../core/actions.ts";
+import { normalizeClipboardText, normalizeExternalUrl, normalizeSpeechText, parseBrowserTaskContent, parseCalendarEventContent, parseConnectorMessageContent, parseDesktopNotificationContent, parseMailDraftContent } from "../core/actions.ts";
+import { normalizePersonalizationState } from "../core/personalization.ts";
 import { nowIso } from "../utils/text.ts";
 import type { ViserConfig } from "../core/types.ts";
 
 const SESSION_WARN_BYTES = 5_000_000;
 const SESSION_WARN_LINES = 1_000;
 const SESSION_REPAIR_KEEP_LINES = 1_000;
+const VALID_ACCESS_CONNECTORS = ["telegram", "discord", "slack", "matrix", "signal", "imessage", "whatsapp", "line", "google-chat", "webhook", "home-assistant", "teams", "mattermost", "synology-chat", "rocket-chat", "feishu", "dingtalk", "wecom", "zalo", "irc", "twitch", "ntfy", "mastodon", "nextcloud-talk", "webex", "zulip", "email", "github", "todoist", "notion", "obsidian"];
+const VALID_TASK_SOURCES = ["cli", "voice", "web-chat", ...VALID_ACCESS_CONNECTORS, "test"];
+const VALID_DELIVERY_KINDS = ["console", ...VALID_ACCESS_CONNECTORS];
+const VALID_CONNECTOR_PREFIXES = VALID_ACCESS_CONNECTORS.map((connector) => `${connector}:`);
+const VALID_ACCESS_CONNECTOR_LABEL = VALID_ACCESS_CONNECTORS.join(", ");
+const VALID_TASK_SOURCE_LABEL = ["cli", "voice", "web-chat", ...VALID_ACCESS_CONNECTORS, "test"].join(", ");
+const VALID_DELIVERY_KIND_LABEL = ["console", ...VALID_ACCESS_CONNECTORS].join(", ");
 
 export type StateHealthStatus = "pass" | "warn" | "fail";
-type StateFileKind = "json-array" | "json-object" | "scheduler-tasks" | "jobs-state" | "access-state" | "actions-state" | "jsonl";
+type StateFileKind = "json-array" | "json-object" | "scheduler-tasks" | "jobs-state" | "access-state" | "actions-state" | "personalization-state" | "jsonl";
 
 export interface StateHealthItem {
   status: StateHealthStatus;
@@ -92,6 +100,9 @@ export async function stateHealthItems(config: ViserConfig): Promise<StateHealth
   if (await isRegularStateDirectory("memory", config.memory.dir, config.assistant.workdir, items)) {
     await checkJsonlFile("memory", join(config.memory.dir, "entries.jsonl"), config.assistant.workdir, items);
   }
+  if (await isRegularStateDirectory("personalization", config.personalization.dir, config.assistant.workdir, items)) {
+    await checkJsonFile("personalization", join(config.personalization.dir, "settings.json"), "personalization-state", config.assistant.workdir, items);
+  }
   if (await isRegularStateDirectory("scheduler", config.scheduler.dir, config.assistant.workdir, items)) {
     await checkJsonFile("scheduler", join(config.scheduler.dir, "tasks.json"), "scheduler-tasks", config.assistant.workdir, items);
     await checkJsonlFile("scheduler", join(config.scheduler.dir, "runs.jsonl"), config.assistant.workdir, items);
@@ -155,7 +166,7 @@ async function checkJsonFile(
         area,
         path,
         message: shape.reason,
-        next: "Run `node src/index.ts state-check --repair` to preview a safe reset, or inspect the file manually.",
+        next: "Run `viser state-check --repair` to preview a safe reset, or inspect the file manually.",
         repair: { path, kind }
       });
       return;
@@ -168,7 +179,7 @@ async function checkJsonFile(
           area,
           path,
           message: `valid JSON state; access state contains ${cleanup.reasons.join(" and ")}`,
-          next: "Run `node src/index.ts state-check --repair --force` to remove stale pairing codes and scrub legacy pair-code sources.",
+          next: "Run `viser state-check --repair --force` to remove stale pairing codes and scrub legacy pair-code sources.",
           repair: { path, kind, replacementContent: `${JSON.stringify(cleanup.state, null, 2)}\n` }
         });
         return;
@@ -182,7 +193,7 @@ async function checkJsonFile(
           area,
           path,
           message: `valid JSON state; actions state contains ${cleanup.redactedCount} decided action content value${cleanup.redactedCount === 1 ? "" : "s"}`,
-          next: "Run `node src/index.ts state-check --repair --force` to redact approved/rejected action content while preserving pending actions.",
+          next: "Run `viser state-check --repair --force` to redact approved/rejected action content while preserving pending actions.",
           repair: { path, kind, replacementContent: `${JSON.stringify(cleanup.state, null, 2)}\n` }
         });
         return;
@@ -195,7 +206,7 @@ async function checkJsonFile(
       area,
       path,
       message: `invalid JSON: ${error instanceof Error ? error.message : String(error)}`,
-      next: "Run `node src/index.ts state-check --repair` to preview quarantine/reset, or restore from backup.",
+      next: "Run `viser state-check --repair` to preview quarantine/reset, or restore from backup.",
       repair: { path, kind }
     });
   }
@@ -241,7 +252,7 @@ async function checkJsonlFile(
     area,
     path,
     message: `${invalid.length} invalid JSONL line(s): ${invalid.slice(0, 3).map((item) => `line ${item.line} ${item.message}`).join("; ")}`,
-    next: "Run `node src/index.ts state-check --repair` to preview rewriting only valid lines, or edit the file manually.",
+    next: "Run `viser state-check --repair` to preview rewriting only valid lines, or edit the file manually.",
     repair: { path, kind: "jsonl", validJsonlLines: validLines }
   });
 }
@@ -263,8 +274,8 @@ function largeSessionWarning(path: string, raw: string, validLines: string[]): S
     path,
     message: `large session history (${validLines.length} lines, ${bytes} bytes)`,
     next: repairLines
-      ? `Run \`node src/index.ts state-check --repair --force\` to keep the newest ${SESSION_REPAIR_KEEP_LINES} JSONL messages with a backup, or run \`node src/index.ts session-compact ${sessionId} ${SESSION_REPAIR_KEEP_LINES}\`.`
-      : `Run \`node src/index.ts session-compact ${sessionId} ${SESSION_REPAIR_KEEP_LINES}\` or inspect the large individual messages manually.`,
+      ? `Run \`viser state-check --repair --force\` to keep the newest ${SESSION_REPAIR_KEEP_LINES} JSONL messages with a backup, or run \`viser session-compact ${sessionId} ${SESSION_REPAIR_KEEP_LINES}\`.`
+      : `Run \`viser session-compact ${sessionId} ${SESSION_REPAIR_KEEP_LINES}\` or inspect the large individual messages manually.`,
     repair: repairLines ? { path, kind: "jsonl", validJsonlLines: repairLines } : undefined
   };
 }
@@ -418,6 +429,7 @@ function validateJsonShape(value: unknown, kind: Exclude<StateFileKind, "jsonl">
   if (kind === "scheduler-tasks") return validateArrayItems(value, "scheduled task", validateScheduledTask);
   if (kind === "jobs-state") return validateArrayItems(value, "queued job", validateQueuedJob);
   if (kind === "actions-state") return validateArrayItems(value, "pending action", validatePendingAction);
+  if (kind === "personalization-state") return validatePersonalizationState(value);
   return validateAccessState(value);
 }
 
@@ -438,7 +450,7 @@ function validateScheduledTask(value: unknown): string | undefined {
   if (!isPlainObject(value)) return "expected object";
   const requiredString = firstMissingString(value, ["id", "prompt", "sessionId", "source", "createdAt"]);
   if (requiredString) return `${requiredString} must be a string`;
-  if (!["cli", "telegram", "discord", "test"].includes(String(value.source))) return "source must be cli, telegram, discord, or test";
+  if (!VALID_TASK_SOURCES.includes(String(value.source))) return `source must be one of ${VALID_TASK_SOURCE_LABEL}`;
   if (typeof value.enabled !== "boolean") return "enabled must be a boolean";
   if (!Number.isInteger(value.runCount) || Number(value.runCount) < 0) return "runCount must be a non-negative integer";
   if (value.providerId !== undefined && typeof value.providerId !== "string") return "providerId must be a string when present";
@@ -449,7 +461,7 @@ function validateScheduledTask(value: unknown): string | undefined {
     return "intervalMs must be a positive integer when present";
   }
   if (!isPlainObject(value.delivery)) return "delivery must be an object";
-  if (!["console", "telegram", "discord"].includes(String(value.delivery.kind))) return "delivery.kind must be console, telegram, or discord";
+  if (!VALID_DELIVERY_KINDS.includes(String(value.delivery.kind))) return `delivery.kind must be one of ${VALID_DELIVERY_KIND_LABEL}`;
   if (value.delivery.targetId !== undefined && typeof value.delivery.targetId !== "string") return "delivery.targetId must be a string when present";
   return undefined;
 }
@@ -458,7 +470,7 @@ function validateQueuedJob(value: unknown): string | undefined {
   if (!isPlainObject(value)) return "expected object";
   const requiredString = firstMissingString(value, ["id", "prompt", "sessionId", "source", "status", "createdAt"]);
   if (requiredString) return `${requiredString} must be a string`;
-  if (!["cli", "telegram", "discord", "test"].includes(String(value.source))) return "source must be cli, telegram, discord, or test";
+  if (!VALID_TASK_SOURCES.includes(String(value.source))) return `source must be one of ${VALID_TASK_SOURCE_LABEL}`;
   if (!["pending", "running", "done", "failed", "cancelled"].includes(String(value.status))) return "status must be pending, running, done, failed, or cancelled";
   if (!Number.isInteger(value.attempts) || Number(value.attempts) < 0) return "attempts must be a non-negative integer";
   if (value.dependsOn !== undefined) {
@@ -478,7 +490,7 @@ function validatePendingAction(value: unknown): string | undefined {
   if (!isPlainObject(value)) return "expected object";
   const requiredString = firstMissingString(value, ["id", "type", "targetPath", "content", "status", "source", "createdAt"]);
   if (requiredString) return `${requiredString} must be a string`;
-  if (!["write-file", "append-file", "open-url", "speak", "calendar-event", "mail-draft", "notify", "clipboard", "connector-message"].includes(String(value.type))) return "type must be write-file, append-file, open-url, speak, calendar-event, mail-draft, notify, clipboard, or connector-message";
+  if (!["write-file", "append-file", "open-url", "speak", "calendar-event", "mail-draft", "notify", "clipboard", "connector-message", "browser-task"].includes(String(value.type))) return "type must be write-file, append-file, open-url, speak, calendar-event, mail-draft, notify, clipboard, connector-message, or browser-task";
   const status = String(value.status);
   if (!["pending", "approved", "rejected"].includes(status)) return "status must be pending, approved, or rejected";
   const redactedDecidedContent = status !== "pending" && /^\[\d+ bytes\]$/u.test(String(value.content));
@@ -545,8 +557,8 @@ function validatePendingAction(value: unknown): string | undefined {
     }
   }
   if (value.type === "connector-message") {
-    if (!String(value.targetPath).startsWith("telegram:") && !String(value.targetPath).startsWith("discord:")) {
-      return "connector-message targetPath must start with telegram: or discord:";
+    if (!VALID_CONNECTOR_PREFIXES.some((prefix) => String(value.targetPath).startsWith(prefix))) {
+      return `connector-message targetPath must start with one of ${VALID_CONNECTOR_PREFIXES.join(", ")}`;
     }
     if (!redactedDecidedContent) {
       try {
@@ -557,9 +569,38 @@ function validatePendingAction(value: unknown): string | undefined {
       }
     }
   }
+  if (value.type === "browser-task") {
+    if (!/^(?:browser-use-cloud|local-cdp|browserbase-session|firecrawl-interact):/u.test(String(value.targetPath))) return "browser-task targetPath must start with browser-use-cloud:, local-cdp:, browserbase-session:, or firecrawl-interact:";
+    if (!redactedDecidedContent) {
+      try {
+        const task = parseBrowserTaskContent(String(value.content));
+        if (`${task.provider}:${task.allowedDomains.join(",")}` !== String(value.targetPath)) return "browser-task targetPath must match content provider and allowed domains";
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+    }
+  }
   if (value.decidedAt !== undefined && typeof value.decidedAt !== "string") return "decidedAt must be a string when present";
   if (value.backupPath !== undefined && typeof value.backupPath !== "string") return "backupPath must be a string when present";
   return undefined;
+}
+
+function validatePersonalizationState(value: unknown): { ok: true } | { ok: false; reason: string } {
+  if (!isPlainObject(value)) return { ok: false, reason: "expected personalization state object" };
+  if (value.version !== undefined && value.version !== 1) return { ok: false, reason: "personalization version must be 1 when present" };
+  if (value.updatedAt !== undefined && typeof value.updatedAt !== "string") return { ok: false, reason: "updatedAt must be a string when present" };
+  if (!Array.isArray(value.settings)) return { ok: false, reason: "expected personalization state with settings[]" };
+  try {
+    normalizePersonalizationState(value);
+  } catch (error) {
+    return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+  }
+  for (const [index, setting] of value.settings.entries()) {
+    if (!isPlainObject(setting)) return { ok: false, reason: `personalization setting at index ${index}: expected object` };
+    const missing = firstMissingString(setting, ["key", "value", "source", "createdAt", "updatedAt"]);
+    if (missing) return { ok: false, reason: `personalization setting at index ${index}: ${missing} must be a string` };
+  }
+  return { ok: true };
 }
 
 function validateAccessState(value: unknown): { ok: true } | { ok: false; reason: string } {
@@ -584,7 +625,7 @@ function validateAccessPeer(value: unknown): string | undefined {
   if (!isPlainObject(value)) return "expected object";
   const requiredString = firstMissingString(value, ["connector", "id", "createdAt", "source"]);
   if (requiredString) return `${requiredString} must be a string`;
-  if (!["telegram", "discord"].includes(String(value.connector))) return "connector must be telegram or discord";
+  if (!VALID_ACCESS_CONNECTORS.includes(String(value.connector))) return `connector must be one of ${VALID_ACCESS_CONNECTOR_LABEL}`;
   if (value.label !== undefined && typeof value.label !== "string") return "label must be a string when present";
   return undefined;
 }
@@ -593,7 +634,7 @@ function validatePairingCode(value: unknown): string | undefined {
   if (!isPlainObject(value)) return "expected object";
   const requiredString = firstMissingString(value, ["code", "createdAt", "expiresAt"]);
   if (requiredString) return `${requiredString} must be a string`;
-  if (value.connector !== undefined && !["telegram", "discord"].includes(String(value.connector))) return "connector must be telegram or discord when present";
+  if (value.connector !== undefined && !VALID_ACCESS_CONNECTORS.includes(String(value.connector))) return `connector must be one of ${VALID_ACCESS_CONNECTOR_LABEL} when present`;
   if (value.label !== undefined && typeof value.label !== "string") return "label must be a string when present";
   if (value.usedAt !== undefined && typeof value.usedAt !== "string") return "usedAt must be a string when present";
   return undefined;
@@ -633,6 +674,7 @@ function repairedContent(plan: StateRepairPlan): string {
   }
   if (["json-array", "scheduler-tasks", "jobs-state", "actions-state"].includes(plan.kind)) return "[]\n";
   if (plan.kind === "access-state") return `${JSON.stringify({ peers: [], codes: [] }, null, 2)}\n`;
+  if (plan.kind === "personalization-state") return `${JSON.stringify({ version: 1, settings: [] }, null, 2)}\n`;
   return "{}\n";
 }
 

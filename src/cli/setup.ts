@@ -30,17 +30,17 @@ export async function setupReport(force = false): Promise<string> {
     "Next steps:",
     "1. Run `codex login`, `gemini`, and/or `claude` in a normal terminal to complete local CLI account login.",
     "2. Put TELEGRAM_BOT_TOKEN and DISCORD_BOT_TOKEN in `.env`, your shell, or a `VISER_ENV` file if you want messaging.",
-    "3. Confirm env/token loading without leaking secrets: `node src/index.ts env-check`.",
-    "4. Verify provider runtime and live connector tokens with `node src/index.ts provider-guide --probe` or `node src/index.ts verify --live --probe-all-providers`.",
-    "5. Prove local non-provider features with `node src/index.ts smoke`.",
-    "6. Run `node src/index.ts config-check`, `node src/index.ts state-check`, and `node src/index.ts audit` before leaving gateway/service running.",
-    "7. Run `node src/index.ts gateway --dry-run --strict --live --probe-all-providers` for a no-start live provider-proof launch rehearsal.",
-    "8. Run `node src/index.ts launch-status` anytime for one single live launch verdict.",
-    "9. Start safe foreground gateway with `node src/index.ts gateway` only after the rehearsal passes; direct gateway now validates live connector tokens and runs the live provider-proof gate by default.",
-    "10. For launchd, use `node src/index.ts service plist` / `service install`; the generated service runs `service-run --live --probe-all-providers` and avoids restart loops when preflight is blocked.",
-    "11. For CLI-only use now, run `node src/index.ts chat` or `node src/index.ts ask \"질문\"`.",
-    "12. Store durable preferences with `/remember ... #tag` before expecting long-term personalization.",
-    "13. Run `node src/index.ts next-steps --live --probe-all-providers` anytime for an actionable recovery/launch checklist."
+    "3. Confirm env/token loading without leaking secrets: `viser env-check`.",
+    "4. Verify provider runtime and live connector tokens with `viser provider-guide --probe` or `viser verify --live --probe-all-providers`.",
+    "5. Prove local non-provider features with `viser smoke`.",
+    "6. Run `viser config-check`, `viser state-check`, and `viser audit` before starting the foreground runtime.",
+    "7. Run `viser gateway --dry-run --strict --live --probe-all-providers` for a no-start live provider-proof launch rehearsal.",
+    "8. Run `viser launch-status` anytime for one single live launch verdict.",
+    "9. Start Viser with `viser` in a foreground terminal window only after the rehearsal passes; the process stops when that terminal exits.",
+    "10. Background service install/start/service-run and artifact generation are disabled. If an old service exists, remove it with `viser service uninstall`.",
+    "11. For CLI-only use now, run `viser chat` or `viser ask \"질문\"`.",
+    "12. Store durable global style/personality settings with `viser persona tone \"...\"`; store discovered facts with `/remember ... #tag`.",
+    "13. Run `viser next-steps --live --probe-all-providers` anytime for an actionable recovery/launch checklist."
   ].join("\n");
 }
 

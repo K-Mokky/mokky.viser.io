@@ -59,12 +59,16 @@ const OBFUSCATED_INSTRUCTION_SIGNAL: PromptInjectionSignal = {
 };
 const ENCODED_INSTRUCTION_SIGNAL: PromptInjectionSignal = {
   id: "encoded-instruction",
-  description: "uses base64-encoded text around prompt-like instructions"
+  description: "uses encoded text around prompt-like instructions"
 };
 const INVISIBLE_PROMPT_CONTROL_PATTERN = /[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/u;
 const INVISIBLE_PROMPT_CONTROL_GLOBAL = /[\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/gu;
 const HTML_COMMENT_PATTERN = /<!--([\s\S]*?)-->/gu;
 const BASE64_CANDIDATE_PATTERN = /(?:^|[^A-Za-z0-9+/=])([A-Za-z0-9+/]{24,}={0,2})(?=$|[^A-Za-z0-9+/=])/gu;
+const BASE64URL_CANDIDATE_PATTERN = /(?:^|[^A-Za-z0-9_-])([A-Za-z0-9_-]{24,}={0,2})(?=$|[^A-Za-z0-9_-])/gu;
+const HEX_CANDIDATE_PATTERN = /(?:^|[^A-Fa-f0-9])(?:0x)?([A-Fa-f0-9]{32,})(?=$|[^A-Fa-f0-9])/gu;
+const PERCENT_ESCAPE_PATTERN = /%(?:[0-9A-Fa-f]{2})/u;
+const HTML_ENTITY_PATTERN = /&(?:#\d{2,7}|#x[0-9A-Fa-f]{2,6}|(?:amp|lt|gt|quot|apos));/iu;
 
 export function promptSafetyContract(): string {
   return [
@@ -107,7 +111,7 @@ export function detectPromptInjectionSignals(content: string): PromptInjectionSi
   if (signals.length > 0 && isObfuscatedPromptText(content, normalized)) {
     signals.push(OBFUSCATED_INSTRUCTION_SIGNAL);
   }
-  if (signals.length > 0 && matchedVariantKinds.has("base64")) signals.push(ENCODED_INSTRUCTION_SIGNAL);
+  if (signals.length > 0 && matchedVariantKinds.has("encoded")) signals.push(ENCODED_INSTRUCTION_SIGNAL);
   return signals;
 }
 
@@ -138,7 +142,7 @@ export function escapePromptData(content: string): string {
 }
 
 interface DetectionVariant {
-  kind: "raw" | "normalized" | "base64";
+  kind: "raw" | "normalized" | "encoded";
   text: string;
 }
 
@@ -146,8 +150,8 @@ function detectionVariants(content: string): DetectionVariant[] {
   const normalized = normalizeForPromptGuardDetection(content);
   const variants: DetectionVariant[] = [{ kind: "raw", text: content }];
   if (normalized !== content) variants.push({ kind: "normalized", text: normalized });
-  for (const decoded of decodeBase64PromptCandidates(normalized)) {
-    variants.push({ kind: "base64", text: decoded });
+  for (const decoded of decodeEncodedPromptCandidates(normalized)) {
+    variants.push({ kind: "encoded", text: decoded });
   }
   return variants;
 }
@@ -164,9 +168,16 @@ function isObfuscatedPromptText(original: string, normalized: string): boolean {
     && (INVISIBLE_PROMPT_CONTROL_PATTERN.test(original) || /<!--[\s\S]*?-->/u.test(original));
 }
 
-function decodeBase64PromptCandidates(content: string): string[] {
+function decodeEncodedPromptCandidates(content: string): string[] {
   const decoded: string[] = [];
   const seen = new Set<string>();
+
+  for (const text of decodeWholeTextEncodings(content)) {
+    if (seen.has(text) || !looksLikePrintableText(text)) continue;
+    seen.add(text);
+    decoded.push(text);
+  }
+
   for (const match of content.matchAll(BASE64_CANDIDATE_PATTERN)) {
     const candidate = match[1];
     if (candidate.length > 4096 || candidate.length % 4 !== 0) continue;
@@ -176,6 +187,43 @@ function decodeBase64PromptCandidates(content: string): string[] {
     seen.add(text);
     decoded.push(text);
   }
+
+  for (const match of content.matchAll(BASE64URL_CANDIDATE_PATTERN)) {
+    const candidate = match[1];
+    if (candidate.length > 4096) continue;
+
+    const text = decodeStrictBase64Url(candidate);
+    if (!text || seen.has(text) || !looksLikePrintableText(text)) continue;
+    seen.add(text);
+    decoded.push(text);
+  }
+
+  for (const match of content.matchAll(HEX_CANDIDATE_PATTERN)) {
+    const candidate = match[1];
+    if (candidate.length > 8192 || candidate.length % 2 !== 0) continue;
+
+    const text = decodeStrictHex(candidate);
+    if (!text || seen.has(text) || !looksLikePrintableText(text)) continue;
+    seen.add(text);
+    decoded.push(text);
+  }
+
+  return decoded;
+}
+
+function decodeWholeTextEncodings(content: string): string[] {
+  const decoded: string[] = [];
+
+  if (PERCENT_ESCAPE_PATTERN.test(content)) {
+    const text = decodePercentText(content);
+    if (text && text !== content) decoded.push(text);
+  }
+
+  if (HTML_ENTITY_PATTERN.test(content)) {
+    const text = decodeHtmlEntities(content);
+    if (text && text !== content) decoded.push(text);
+  }
+
   return decoded;
 }
 
@@ -189,6 +237,59 @@ function decodeStrictBase64(candidate: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function decodeStrictBase64Url(candidate: string): string | undefined {
+  try {
+    const withoutPadding = candidate.replace(/=+$/u, "");
+    const padded = withoutPadding.padEnd(withoutPadding.length + ((4 - (withoutPadding.length % 4)) % 4), "=");
+    const base64 = padded.replace(/-/gu, "+").replace(/_/gu, "/");
+    const buffer = Buffer.from(base64, "base64");
+    if (buffer.length === 0) return undefined;
+    const roundTrip = buffer.toString("base64url").replace(/=+$/u, "");
+    if (roundTrip !== withoutPadding) return undefined;
+    return buffer.toString("utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+function decodeStrictHex(candidate: string): string | undefined {
+  try {
+    const buffer = Buffer.from(candidate, "hex");
+    if (buffer.length === 0 || buffer.toString("hex").toLowerCase() !== candidate.toLowerCase()) return undefined;
+    return buffer.toString("utf8");
+  } catch {
+    return undefined;
+  }
+}
+
+function decodePercentText(content: string): string | undefined {
+  try {
+    return decodeURIComponent(content);
+  } catch {
+    return undefined;
+  }
+}
+
+function decodeHtmlEntities(content: string): string {
+  return content.replace(/&(#\d{2,7}|#x[0-9A-Fa-f]{2,6}|amp|lt|gt|quot|apos);/giu, (_entity, body: string) => {
+    const lower = body.toLowerCase();
+    if (lower === "amp") return "&";
+    if (lower === "lt") return "<";
+    if (lower === "gt") return ">";
+    if (lower === "quot") return "\"";
+    if (lower === "apos") return "'";
+    const codePoint = lower.startsWith("#x")
+      ? Number.parseInt(lower.slice(2), 16)
+      : Number.parseInt(lower.slice(1), 10);
+    if (!Number.isFinite(codePoint) || codePoint < 0 || codePoint > 0x10ffff) return "";
+    try {
+      return String.fromCodePoint(codePoint);
+    } catch {
+      return "";
+    }
+  });
 }
 
 function looksLikePrintableText(text: string): boolean {
