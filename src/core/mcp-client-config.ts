@@ -36,7 +36,9 @@ export interface McpClientConfigResult {
   notes: string[];
 }
 
-const INDEX_ENTRYPOINT = fileURLToPath(new URL("../index.ts", import.meta.url));
+const CURRENT_MODULE_PATH = fileURLToPath(import.meta.url);
+const ENTRYPOINT_EXTENSION = CURRENT_MODULE_PATH.endsWith(".ts") ? ".ts" : ".js";
+const INDEX_ENTRYPOINT = fileURLToPath(new URL(`../index${ENTRYPOINT_EXTENSION}`, import.meta.url));
 const SERVER_NAME_PATTERN = /^[A-Za-z0-9_.-]{1,64}$/;
 
 const TARGET_LABELS: Record<McpClientTarget, string> = {

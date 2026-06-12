@@ -29,6 +29,7 @@ CLIs instead of GPT/Gemini/Claude model HTTP APIs or model API keys.
 4. Run the verification set before opening a PR:
 
 ```bash
+npm run build
 npm test
 npm run typecheck
 npm run audit
@@ -42,6 +43,7 @@ For final local-provider and messenger proof, run this in an environment where
 tokens are configured:
 
 ```bash
+npm run build
 node src/index.ts release-evidence --strict --live --probe-all-providers
 ```
 

@@ -55,6 +55,38 @@ test("readinessItems fails when a persistent directory is not writable", async (
   }
 });
 
+test("readinessItems checks the persistent web dashboard canvas directory when enabled", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-ready-dashboard-canvas-"));
+  try {
+    const config = readyConfig(dir);
+    const filePath = join(dir, "dashboard-canvas-not-dir");
+    await writeFile(filePath, "not a directory", "utf8");
+    config.webDashboard = { ...DEFAULT_CONFIG.webDashboard, enabled: true, host: "127.0.0.1", port: 8787, canvasDir: filePath };
+
+    const items = await readinessItems(config);
+    assert.ok(items.some((item) => item.area === "web-dashboard" && item.status === "fail"));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("readinessItems requires a strong token for non-local dashboard hosts", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-ready-dashboard-remote-"));
+  try {
+    const config = readyConfig(dir);
+    config.webDashboard = { ...DEFAULT_CONFIG.webDashboard, enabled: true, host: "0.0.0.0", port: 8787, canvasDir: join(dir, "dashboard"), allowRemote: true };
+
+    const missing = await readinessItems(config);
+    assert.ok(missing.some((item) => item.area === "web-dashboard-auth" && item.status === "fail"));
+
+    config.webDashboard.authToken = "dashboard-secret-token-123456";
+    const ready = await readinessItems(config);
+    assert.ok(ready.some((item) => item.area === "web-dashboard-auth" && item.status === "pass"));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("writeReadinessProbeFileNoFollow refuses existing symlink probe paths", async () => {
   const dir = await mkdtemp(join(tmpdir(), "viser-ready-probe-symlink-"));
   try {
@@ -192,16 +224,90 @@ test("readinessItems treats disabled connectors without tokens as intentionally 
     };
     config.connectors = {
       telegram: { ...DEFAULT_CONFIG.connectors.telegram, enabled: false, botToken: undefined },
-      discord: { ...DEFAULT_CONFIG.connectors.discord, enabled: false, botToken: undefined }
+      discord: { ...DEFAULT_CONFIG.connectors.discord, enabled: false, botToken: undefined },
+      slack: { ...DEFAULT_CONFIG.connectors.slack, enabled: false, botToken: undefined, appToken: undefined },
+      matrix: { ...DEFAULT_CONFIG.connectors.matrix, enabled: false, homeserverUrl: undefined, accessToken: undefined },
+      signal: { ...DEFAULT_CONFIG.connectors.signal, enabled: false, account: undefined, allowedRecipientIds: [], defaultRecipientIds: [] },
+      imessage: { ...DEFAULT_CONFIG.connectors.imessage, enabled: false, allowedHandleIds: [], defaultHandleIds: [] },
+      whatsapp: { ...DEFAULT_CONFIG.connectors.whatsapp, enabled: false, allowedRecipientIds: [], defaultRecipientIds: [] },
+      line: { ...DEFAULT_CONFIG.connectors.line, enabled: false, allowedPeerIds: [], defaultPeerIds: [] },
+      kakaotalk: { ...DEFAULT_CONFIG.connectors.kakaotalk, enabled: false, requestToken: undefined, allowedUserIds: [], defaultUserIds: [] },
+      googleChat: { ...DEFAULT_CONFIG.connectors.googleChat, enabled: false, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      webhook: { ...DEFAULT_CONFIG.connectors.webhook, enabled: false, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      homeAssistant: { ...DEFAULT_CONFIG.connectors.homeAssistant, baseUrl: undefined, accessToken: undefined, service: undefined, services: {}, allowedServiceIds: [], defaultServiceIds: [] },
+      teams: { ...DEFAULT_CONFIG.connectors.teams, enabled: false, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      mattermost: { ...DEFAULT_CONFIG.connectors.mattermost, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      synologyChat: { ...DEFAULT_CONFIG.connectors.synologyChat, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      rocketChat: { ...DEFAULT_CONFIG.connectors.rocketChat, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      feishu: { ...DEFAULT_CONFIG.connectors.feishu, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      dingtalk: { ...DEFAULT_CONFIG.connectors.dingtalk, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      wecom: { ...DEFAULT_CONFIG.connectors.wecom, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      zalo: { ...DEFAULT_CONFIG.connectors.zalo, accessToken: undefined, recipient: undefined, recipients: {}, allowedRecipientIds: [], defaultRecipientIds: [] },
+      irc: { ...DEFAULT_CONFIG.connectors.irc, host: undefined, nick: undefined, password: undefined, channel: undefined, channels: {}, allowedChannelIds: [], defaultChannelIds: [] },
+      twitch: { ...DEFAULT_CONFIG.connectors.twitch, accessToken: undefined, botUsername: undefined, channel: undefined, channels: {}, allowedChannelIds: [], defaultChannelIds: [] },
+      ntfy: { ...DEFAULT_CONFIG.connectors.ntfy, enabled: false, token: undefined, topic: undefined, topics: {}, allowedTopicIds: [], defaultTopicIds: [] },
+      mastodon: { ...DEFAULT_CONFIG.connectors.mastodon, enabled: false, baseUrl: undefined, accessToken: undefined, visibility: "private", targets: {}, allowedTargetIds: [], defaultTargetIds: [] },
+      nextcloudTalk: { ...DEFAULT_CONFIG.connectors.nextcloudTalk, baseUrl: undefined, username: undefined, appPassword: undefined, roomToken: undefined, rooms: {}, allowedRoomIds: [], defaultRoomIds: [] },
+      webex: { ...DEFAULT_CONFIG.connectors.webex, enabled: false, accessToken: undefined, allowedRoomIds: [], defaultRoomIds: [] },
+      zulip: { ...DEFAULT_CONFIG.connectors.zulip, enabled: false, siteUrl: undefined, botEmail: undefined, apiKey: undefined, target: undefined, targets: {}, allowedTargetIds: [], defaultTargetIds: [] },
+      email: { ...DEFAULT_CONFIG.connectors.email, enabled: false, from: undefined, recipient: undefined, recipients: {}, allowedRecipientIds: [], defaultRecipientIds: [] },
+      github: { ...DEFAULT_CONFIG.connectors.github, enabled: false, token: undefined, target: undefined, targets: {}, allowedTargetIds: [], defaultTargetIds: [] },
+      todoist: { ...DEFAULT_CONFIG.connectors.todoist, enabled: false, token: undefined, project: undefined, projects: {}, allowedProjectIds: [], defaultProjectIds: [] },
+      notion: { ...DEFAULT_CONFIG.connectors.notion, enabled: false, token: undefined, page: undefined, pages: {}, allowedPageIds: [], defaultPageIds: [] },
+      obsidian: { ...DEFAULT_CONFIG.connectors.obsidian, enabled: false, vaultDir: undefined, note: undefined, notes: {}, allowedNoteIds: [], defaultNoteIds: [] }
     };
 
     const items = await readinessItems(config, { live: true, probeAllProviders: true });
-    const connectorItems = items.filter((item) => ["telegram", "discord", "live"].includes(item.area));
+    const connectorItems = items.filter((item) => ["telegram", "discord", "slack", "matrix", "signal", "imessage", "whatsapp", "line", "kakaotalk", "google-chat", "webhook", "teams", "mattermost", "rocket-chat", "feishu", "dingtalk", "wecom", "zalo", "irc", "twitch", "ntfy", "mastodon", "webex", "zulip", "live"].includes(item.area));
 
     assert.ok(items.some((item) => item.area === "telegram" && item.status === "pass" && /disabled/.test(item.message)));
     assert.ok(items.some((item) => item.area === "discord" && item.status === "pass" && /disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "slack" && item.status === "pass" && /disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "matrix" && item.status === "pass" && /disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "signal" && item.status === "pass" && /disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "imessage" && item.status === "pass" && /disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "whatsapp" && item.status === "pass" && /disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "line" && item.status === "pass" && /disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "kakaotalk" && item.status === "pass" && /disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "google-chat" && item.status === "pass" && /disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "webhook" && item.status === "pass" && /disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "teams" && item.status === "pass" && /disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "mattermost" && item.status === "pass" && /disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "rocket-chat" && item.status === "pass" && /disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "feishu" && item.status === "pass" && /disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "dingtalk" && item.status === "pass" && /disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "wecom" && item.status === "pass" && /disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "zalo" && item.status === "pass" && /disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "irc" && item.status === "pass" && /disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "twitch" && item.status === "pass" && /disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "ntfy" && item.status === "pass" && /disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "mastodon" && item.status === "pass" && /disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "webex" && item.status === "pass" && /disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "zulip" && item.status === "pass" && /disabled/.test(item.message)));
     assert.ok(items.some((item) => item.area === "live" && item.status === "pass" && /telegram: disabled/.test(item.message)));
     assert.ok(items.some((item) => item.area === "live" && item.status === "pass" && /discord: disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "live" && item.status === "pass" && /slack: disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "live" && item.status === "pass" && /matrix: disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "live" && item.status === "pass" && /signal: disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "live" && item.status === "pass" && /imessage: disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "live" && item.status === "pass" && /whatsapp: disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "live" && item.status === "pass" && /line: disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "live" && item.status === "pass" && /kakaotalk: disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "live" && item.status === "pass" && /google-chat: disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "live" && item.status === "pass" && /webhook: disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "live" && item.status === "pass" && /teams: disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "live" && item.status === "pass" && /mattermost: disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "live" && item.status === "pass" && /rocket-chat: disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "live" && item.status === "pass" && /feishu: disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "live" && item.status === "pass" && /dingtalk: disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "live" && item.status === "pass" && /wecom: disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "live" && item.status === "pass" && /zalo: disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "live" && item.status === "pass" && /irc: disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "live" && item.status === "pass" && /twitch: disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "live" && item.status === "pass" && /ntfy: disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "live" && item.status === "pass" && /mastodon: disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "live" && item.status === "pass" && /webex: disabled/.test(item.message)));
+    assert.ok(items.some((item) => item.area === "live" && item.status === "pass" && /zulip: disabled/.test(item.message)));
     assert.ok(connectorItems.every((item) => item.status === "pass"));
   } finally {
     await rm(dir, { recursive: true, force: true });
@@ -214,6 +320,7 @@ function readyConfig(dir: string): ViserConfig {
     assistant: { ...DEFAULT_CONFIG.assistant, workdir: dir },
     storage: { dir: join(dir, ".viser") },
     memory: { ...DEFAULT_CONFIG.memory, dir: join(dir, ".viser", "memory") },
+    personalization: { ...DEFAULT_CONFIG.personalization, dir: join(dir, ".viser", "personalization") },
     skills: { ...DEFAULT_CONFIG.skills, dirs: [join(dir, "skills")], promptLimit: 8 },
     tools: { ...DEFAULT_CONFIG.tools, allowedReadRoots: [dir] },
     scheduler: { ...DEFAULT_CONFIG.scheduler, dir: join(dir, ".viser", "scheduler") },

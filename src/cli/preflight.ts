@@ -35,19 +35,19 @@ export async function preflight(config: ViserConfig, options: PreflightOptions =
       "",
       "Launch guidance:",
       ok
-        ? "- Safe local launch gate passed. To only preview gateway readiness: `node src/index.ts gateway --dry-run`."
+        ? "- Safe local launch gate passed. To only preview gateway readiness: `viser gateway --dry-run`."
         : "- Do not launch yet; fix blockers above, then rerun preflight.",
       providerProbeRequested
         ? "- Provider runtime was included in this preflight."
-        : "- To prove provider login before launch, rerun: `node src/index.ts preflight --live --probe-all-providers`.",
+        : "- To prove provider login before launch, rerun: `viser preflight --live --probe-all-providers`.",
       liveRequested
         ? "- Live connector token validation was included in this preflight."
         : "- To validate configured Telegram/Discord tokens before launch, rerun with `--live`.",
-      "- For one final live launch verdict, run: `node src/index.ts launch-status`.",
+      "- For one final live launch verdict, run: `viser launch-status`.",
       providerProbeRequested
-        ? "- Start live provider-proof foreground gateway only when ready: `node src/index.ts gateway`."
-        : "- Direct foreground gateway now adds provider proof by default: `node src/index.ts gateway`.",
-      "- macOS service path: `node src/index.ts service write-plist`, inspect it, then `node src/index.ts service install`."
+        ? "- Start Viser only in a foreground terminal when ready: `viser`."
+        : "- Direct foreground gateway now adds provider proof by default: `viser`.",
+      "- Background service startup is disabled; the runtime stops when the foreground terminal process exits."
     ].join("\n")
   };
 }

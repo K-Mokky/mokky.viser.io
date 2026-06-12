@@ -166,5 +166,38 @@ export function normalizeCode(value: string): string {
 }
 
 export function parseConnector(value: string): AccessConnector | undefined {
-  return value === "telegram" || value === "discord" ? value : undefined;
+  return value === "telegram"
+    || value === "discord"
+    || value === "slack"
+    || value === "matrix"
+    || value === "signal"
+    || value === "imessage"
+    || value === "whatsapp"
+    || value === "line"
+    || value === "kakaotalk"
+    || value === "google-chat"
+    || value === "webhook"
+    || value === "home-assistant"
+    || value === "teams"
+    || value === "mattermost"
+    || value === "synology-chat"
+    || value === "rocket-chat"
+    || value === "feishu"
+    || value === "dingtalk"
+    || value === "wecom"
+    || value === "zalo"
+    || value === "irc"
+    || value === "twitch"
+    || value === "ntfy"
+    || value === "mastodon"
+    || value === "nextcloud-talk"
+    || value === "webex"
+    || value === "zulip"
+    || value === "email"
+    || value === "github"
+    || value === "todoist"
+    || value === "notion"
+    || value === "obsidian"
+    ? value
+    : undefined;
 }

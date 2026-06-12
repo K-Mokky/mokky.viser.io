@@ -59,11 +59,11 @@ export function providerSmokeCommand(
 export function providerIssueAdvice(provider: CliProviderConfig | undefined, detail: string): string[] {
   const id = provider?.id ?? "provider";
   const guideCommand = provider
-    ? `node src/index.ts provider-guide ${provider.id} --probe`
-    : "node src/index.ts provider-guide --probe";
+    ? `viser provider-guide ${provider.id} --probe`
+    : "viser provider-guide --probe";
   const smokeCommand = provider ? `manual smoke test: ${providerSmokeCommand(provider)}` : undefined;
-  const retryCommand = "retry: node src/index.ts verify --live --probe-all-providers";
-  const launchCommand = "final launch verdict: node src/index.ts launch-status";
+  const retryCommand = "retry: viser verify --live --probe-all-providers";
+  const launchCommand = "final launch verdict: viser launch-status";
   const text = `${id}\n${detail}`;
 
   if (/Operation not permitted|sandbox|permission denied/i.test(text)) {
@@ -168,7 +168,7 @@ function formatProbe(
   requested?: boolean,
   probe?: ProviderProbeResult
 ): string {
-  if (!requested) return `skipped (run \`node src/index.ts provider-guide ${provider.id} --probe\`)`;
+  if (!requested) return `skipped (run \`viser provider-guide ${provider.id} --probe\`)`;
   if (!installed) return "skipped because command is missing";
   if (!probe) return "not run";
   return `${probe.ok ? "pass" : "fail"} in ${probe.elapsedMs}ms — ${probe.detail}`;

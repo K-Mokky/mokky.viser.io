@@ -27,14 +27,14 @@ test("setup creates first-run files and prints safe provider-proof launch guidan
     assert.equal(existsSync(join(dir, ".viser", "skills")), true);
     assert.match(stdout, /Viser setup/);
     assert.match(stdout, /Created .*\.env/);
-    assert.match(stdout, /node src\/index.ts env-check/);
-    assert.match(stdout, /node src\/index.ts gateway --dry-run --strict --live --probe-all-providers/);
-    assert.match(stdout, /node src\/index.ts launch-status/);
-    assert.match(stdout, /node src\/index.ts gateway` only after the rehearsal passes/);
-    assert.match(stdout, /service-run --live --probe-all-providers/);
-    assert.match(stdout, /avoids restart loops/);
+    assert.match(stdout, /viser env-check/);
+    assert.match(stdout, /viser gateway --dry-run --strict --live --probe-all-providers/);
+    assert.match(stdout, /viser launch-status/);
+    assert.match(stdout, /Start Viser with `viser` in a foreground terminal window only after the rehearsal passes/);
+    assert.match(stdout, /Background service install\/start\/service-run and artifact generation are disabled/);
+    assert.match(stdout, /viser service uninstall/);
     assert.match(stdout, /VISER_ENV/);
-    assert.doesNotMatch(stdout, /Run `node src\/index.ts gateway` for scheduler \+ messaging/);
+    assert.doesNotMatch(stdout, /Run `viser gateway` for scheduler \+ messaging/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

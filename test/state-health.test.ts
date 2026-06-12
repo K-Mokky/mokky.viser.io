@@ -40,6 +40,7 @@ test("stateHealthItems detects malformed scheduler, jobs, access, and action ent
     await writeStateFile(config.jobs.dir, "jobs.json", JSON.stringify([{ id: "bad-job", status: "pending" }]));
     await writeStateFile(config.access.dir, "access.json", JSON.stringify({ peers: [{ connector: "slack", id: "1" }], codes: [] }));
     await writeStateFile(config.actions.dir, "actions.json", JSON.stringify([{ id: "bad-action", type: "delete-file" }]));
+    await writeStateFile(config.personalization.dir, "settings.json", JSON.stringify({ version: 1, settings: [{ key: "ai.tone" }] }));
 
     const items = await stateHealthItems(config);
 
@@ -47,6 +48,7 @@ test("stateHealthItems detects malformed scheduler, jobs, access, and action ent
     assert.ok(items.some((item) => item.status === "fail" && item.area === "jobs" && /queued job at index 0/.test(item.message)));
     assert.ok(items.some((item) => item.status === "fail" && item.area === "access" && /access peer at index 0/.test(item.message)));
     assert.ok(items.some((item) => item.status === "fail" && item.area === "actions" && /pending action at index 0/.test(item.message)));
+    assert.ok(items.some((item) => item.status === "fail" && item.area === "personalization" && /personalization setting at index 0/.test(item.message)));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -166,6 +168,19 @@ test("stateHealthItems validates desktop notification action shape", async () =>
     assert.ok(!approved.some((item) => item.status === "fail" && item.area === "actions"));
 
     await writeStateFile(config.actions.dir, "actions.json", JSON.stringify([{
+      id: "local-cdp-browser-task-action",
+      type: "browser-task",
+      targetPath: "local-cdp:example.com",
+      content: JSON.stringify({ provider: "local-cdp", task: "Visit example.com", allowedDomains: ["example.com"], maxAgentSteps: 5 }),
+      status: "pending",
+      source: "test",
+      createdAt: "2026-01-01T00:00:00.000Z"
+    }]));
+
+    const localCdp = await stateHealthItems(config);
+    assert.ok(!localCdp.some((item) => item.status === "fail" && item.area === "actions"));
+
+    await writeStateFile(config.actions.dir, "actions.json", JSON.stringify([{
       id: "bad-notify-action",
       type: "notify",
       targetPath: "local-notification",
@@ -212,6 +227,19 @@ test("stateHealthItems validates connector message action shape", async () => {
 
     const approved = await stateHealthItems(config);
     assert.ok(!approved.some((item) => item.status === "fail" && item.area === "actions"));
+
+    await writeStateFile(config.actions.dir, "actions.json", JSON.stringify([{
+      id: "local-cdp-browser-task-action",
+      type: "browser-task",
+      targetPath: "local-cdp:example.com",
+      content: JSON.stringify({ provider: "local-cdp", task: "Visit example.com", allowedDomains: ["example.com"], maxAgentSteps: 5 }),
+      status: "pending",
+      source: "test",
+      createdAt: "2026-01-01T00:00:00.000Z"
+    }]));
+
+    const localCdp = await stateHealthItems(config);
+    assert.ok(!localCdp.some((item) => item.status === "fail" && item.area === "actions"));
 
     await writeStateFile(config.actions.dir, "actions.json", JSON.stringify([{
       id: "bad-connector-message-action",
@@ -262,6 +290,19 @@ test("stateHealthItems validates clipboard action shape", async () => {
     assert.ok(!approved.some((item) => item.status === "fail" && item.area === "actions"));
 
     await writeStateFile(config.actions.dir, "actions.json", JSON.stringify([{
+      id: "local-cdp-browser-task-action",
+      type: "browser-task",
+      targetPath: "local-cdp:example.com",
+      content: JSON.stringify({ provider: "local-cdp", task: "Visit example.com", allowedDomains: ["example.com"], maxAgentSteps: 5 }),
+      status: "pending",
+      source: "test",
+      createdAt: "2026-01-01T00:00:00.000Z"
+    }]));
+
+    const localCdp = await stateHealthItems(config);
+    assert.ok(!localCdp.some((item) => item.status === "fail" && item.area === "actions"));
+
+    await writeStateFile(config.actions.dir, "actions.json", JSON.stringify([{
       id: "bad-clipboard-action",
       type: "clipboard",
       targetPath: "local-clipboard",
@@ -273,6 +314,88 @@ test("stateHealthItems validates clipboard action shape", async () => {
 
     const invalid = await stateHealthItems(config);
     assert.ok(invalid.some((item) => item.status === "fail" && item.area === "actions" && /control characters/.test(item.message)));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("stateHealthItems validates browser task action shape", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-state-browser-task-action-"));
+  try {
+    const config = stateConfig(dir);
+    await writeStateFile(config.actions.dir, "actions.json", JSON.stringify([{
+      id: "browser-task-action",
+      type: "browser-task",
+      targetPath: "browser-use-cloud:example.com",
+      content: JSON.stringify({ provider: "browser-use-cloud", task: "Visit example.com", allowedDomains: ["example.com"], maxAgentSteps: 5 }),
+      status: "pending",
+      source: "test",
+      createdAt: "2026-01-01T00:00:00.000Z"
+    }]));
+
+    const valid = await stateHealthItems(config);
+    assert.ok(!valid.some((item) => item.status === "fail" && item.area === "actions"));
+
+    await writeStateFile(config.actions.dir, "actions.json", JSON.stringify([{
+      id: "approved-browser-task-action",
+      type: "browser-task",
+      targetPath: "browser-use-cloud:example.com",
+      content: "[84 bytes]",
+      status: "approved",
+      source: "test",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      decidedAt: "2026-01-01T00:01:00.000Z"
+    }]));
+
+    const approved = await stateHealthItems(config);
+    assert.ok(!approved.some((item) => item.status === "fail" && item.area === "actions"));
+
+    await writeStateFile(config.actions.dir, "actions.json", JSON.stringify([{
+      id: "local-cdp-browser-task-action",
+      type: "browser-task",
+      targetPath: "local-cdp:example.com",
+      content: JSON.stringify({ provider: "local-cdp", task: "Visit example.com", allowedDomains: ["example.com"], maxAgentSteps: 5 }),
+      status: "pending",
+      source: "test",
+      createdAt: "2026-01-01T00:00:00.000Z"
+    }]));
+
+    const localCdp = await stateHealthItems(config);
+    assert.ok(!localCdp.some((item) => item.status === "fail" && item.area === "actions"));
+
+    await writeStateFile(config.actions.dir, "actions.json", JSON.stringify([{
+      id: "browserbase-browser-task-action",
+      type: "browser-task",
+      targetPath: "browserbase-session:example.com",
+      content: JSON.stringify({ provider: "browserbase-session", task: "Visit example.com", allowedDomains: ["example.com"], maxAgentSteps: 5 }),
+      status: "pending",
+      source: "test",
+      createdAt: "2026-01-01T00:00:00.000Z"
+    }, {
+      id: "firecrawl-browser-task-action",
+      type: "browser-task",
+      targetPath: "firecrawl-interact:example.com",
+      content: JSON.stringify({ provider: "firecrawl-interact", task: "Visit example.com", allowedDomains: ["example.com"], maxAgentSteps: 5 }),
+      status: "pending",
+      source: "test",
+      createdAt: "2026-01-01T00:00:00.000Z"
+    }]));
+
+    const remoteBrowserTasks = await stateHealthItems(config);
+    assert.ok(!remoteBrowserTasks.some((item) => item.status === "fail" && item.area === "actions"));
+
+    await writeStateFile(config.actions.dir, "actions.json", JSON.stringify([{
+      id: "bad-browser-task-action",
+      type: "browser-task",
+      targetPath: "browser-use-cloud:example.com",
+      content: JSON.stringify({ provider: "browser-use-cloud", task: "Visit example.com", allowedDomains: ["evil.example"], maxAgentSteps: 5 }),
+      status: "pending",
+      source: "test",
+      createdAt: "2026-01-01T00:00:00.000Z"
+    }]));
+
+    const invalid = await stateHealthItems(config);
+    assert.ok(invalid.some((item) => item.status === "fail" && item.area === "actions" && /targetPath must match/.test(item.message)));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -618,6 +741,7 @@ test("stateHealthItems refuses storage roots reached through symlinked parents",
       ...config,
       storage: { dir: linkedStorage },
       memory: { ...config.memory, dir: join(linkedStorage, "memory") },
+      personalization: { ...config.personalization, dir: join(linkedStorage, "personalization") },
       scheduler: { ...config.scheduler, dir: join(linkedStorage, "scheduler") },
       jobs: { ...config.jobs, dir: join(linkedStorage, "jobs") },
       access: { ...config.access, dir: join(linkedStorage, "access") },
@@ -675,7 +799,8 @@ test("stateHealthItems refuses missing state directories under symlinked parents
 
     const linkedConfig: ViserConfig = {
       ...config,
-      memory: { ...config.memory, dir: join(linkParent, "missing-memory") }
+      memory: { ...config.memory, dir: join(linkParent, "missing-memory") },
+    personalization: { ...config.personalization, dir: join(linkParent, "missing-personalization") }
     };
 
     const items = await stateHealthItems(linkedConfig);
@@ -717,6 +842,7 @@ function stateConfig(dir: string): ViserConfig {
     assistant: { ...DEFAULT_CONFIG.assistant, workdir: dir },
     storage: { dir: join(dir, ".viser") },
     memory: { ...DEFAULT_CONFIG.memory, dir: join(dir, ".viser", "memory") },
+    personalization: { ...DEFAULT_CONFIG.personalization, dir: join(dir, ".viser", "personalization") },
     skills: { ...DEFAULT_CONFIG.skills, dirs: [join(dir, "skills"), join(dir, ".viser", "skills")] },
     tools: { ...DEFAULT_CONFIG.tools, allowedReadRoots: [dir] },
     scheduler: { ...DEFAULT_CONFIG.scheduler, dir: join(dir, ".viser", "scheduler") },
@@ -725,7 +851,37 @@ function stateConfig(dir: string): ViserConfig {
     actions: { ...DEFAULT_CONFIG.actions, dir: join(dir, ".viser", "actions"), allowedWriteRoots: [dir] },
     connectors: {
       telegram: { ...DEFAULT_CONFIG.connectors.telegram, allowedChatIds: [], defaultChatIds: [] },
-      discord: { ...DEFAULT_CONFIG.connectors.discord, allowedChannelIds: [], defaultChannelIds: [] }
+      discord: { ...DEFAULT_CONFIG.connectors.discord, allowedChannelIds: [], defaultChannelIds: [] },
+      slack: { ...DEFAULT_CONFIG.connectors.slack, allowedChannelIds: [], defaultChannelIds: [] },
+      matrix: { ...DEFAULT_CONFIG.connectors.matrix, allowedRoomIds: [], defaultRoomIds: [] },
+      signal: { ...DEFAULT_CONFIG.connectors.signal, allowedRecipientIds: [], defaultRecipientIds: [] },
+      imessage: { ...DEFAULT_CONFIG.connectors.imessage, allowedHandleIds: [], defaultHandleIds: [] },
+      whatsapp: { ...DEFAULT_CONFIG.connectors.whatsapp, allowedRecipientIds: [], defaultRecipientIds: [] },
+      line: { ...DEFAULT_CONFIG.connectors.line, allowedPeerIds: [], defaultPeerIds: [] },
+      kakaotalk: { ...DEFAULT_CONFIG.connectors.kakaotalk, allowedUserIds: [], defaultUserIds: [] },
+      googleChat: { ...DEFAULT_CONFIG.connectors.googleChat, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      webhook: { ...DEFAULT_CONFIG.connectors.webhook, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      homeAssistant: { ...DEFAULT_CONFIG.connectors.homeAssistant, baseUrl: undefined, accessToken: undefined, service: undefined, services: {}, allowedServiceIds: [], defaultServiceIds: [] },
+      teams: { ...DEFAULT_CONFIG.connectors.teams, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      mattermost: { ...DEFAULT_CONFIG.connectors.mattermost, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      synologyChat: { ...DEFAULT_CONFIG.connectors.synologyChat, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      rocketChat: { ...DEFAULT_CONFIG.connectors.rocketChat, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      feishu: { ...DEFAULT_CONFIG.connectors.feishu, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      dingtalk: { ...DEFAULT_CONFIG.connectors.dingtalk, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      wecom: { ...DEFAULT_CONFIG.connectors.wecom, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      zalo: { ...DEFAULT_CONFIG.connectors.zalo, accessToken: undefined, recipient: undefined, recipients: {}, allowedRecipientIds: [], defaultRecipientIds: [] },
+      irc: { ...DEFAULT_CONFIG.connectors.irc, host: undefined, nick: undefined, password: undefined, channel: undefined, channels: {}, allowedChannelIds: [], defaultChannelIds: [] },
+      twitch: { ...DEFAULT_CONFIG.connectors.twitch, enabled: false, accessToken: undefined, botUsername: undefined, channel: undefined, channels: {}, allowedChannelIds: [], defaultChannelIds: [] },
+      ntfy: { ...DEFAULT_CONFIG.connectors.ntfy, enabled: false, token: undefined, topic: undefined, topics: {}, allowedTopicIds: [], defaultTopicIds: [] },
+      mastodon: { ...DEFAULT_CONFIG.connectors.mastodon, enabled: false, baseUrl: undefined, accessToken: undefined, visibility: "private", targets: {}, allowedTargetIds: [], defaultTargetIds: [] },
+      nextcloudTalk: { ...DEFAULT_CONFIG.connectors.nextcloudTalk, baseUrl: undefined, username: undefined, appPassword: undefined, roomToken: undefined, rooms: {}, allowedRoomIds: [], defaultRoomIds: [] },
+      webex: { ...DEFAULT_CONFIG.connectors.webex, accessToken: undefined, allowedRoomIds: [], defaultRoomIds: [] },
+      zulip: { ...DEFAULT_CONFIG.connectors.zulip, siteUrl: undefined, botEmail: undefined, apiKey: undefined, target: undefined, targets: {}, allowedTargetIds: [], defaultTargetIds: [] },
+      email: { ...DEFAULT_CONFIG.connectors.email, enabled: false, from: undefined, recipient: undefined, recipients: {}, allowedRecipientIds: [], defaultRecipientIds: [] },
+      github: { ...DEFAULT_CONFIG.connectors.github, enabled: false, token: undefined, target: undefined, targets: {}, allowedTargetIds: [], defaultTargetIds: [] },
+      todoist: { ...DEFAULT_CONFIG.connectors.todoist, enabled: false, token: undefined, project: undefined, projects: {}, allowedProjectIds: [], defaultProjectIds: [] },
+      notion: { ...DEFAULT_CONFIG.connectors.notion, enabled: false, token: undefined, page: undefined, pages: {}, allowedPageIds: [], defaultPageIds: [] },
+      obsidian: { ...DEFAULT_CONFIG.connectors.obsidian, enabled: false, vaultDir: undefined, note: undefined, notes: {}, allowedNoteIds: [], defaultNoteIds: [] }
     }
   };
 }

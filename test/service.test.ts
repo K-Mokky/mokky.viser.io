@@ -4,22 +4,14 @@ import { mkdir, mkdtemp, readFile, rm, stat, symlink, writeFile } from "node:fs/
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
-  generateLaunchdPlist,
-  generateSystemdUserService,
-  generateWindowsServiceRunner,
-  generateWindowsTaskXml,
-  installLaunchAgentPlist,
   installService,
+  reinstallService,
   removeLaunchAgentPlist,
   serviceCommand,
-  servicePathValue,
+  serviceLabel,
   trimServiceLogs,
   userLaunchAgentPath,
-  userSystemdUnitPath,
-  windowsTaskUri,
-  writeWorkspaceSystemdService,
-  writeWorkspaceWindowsService,
-  writeWorkspacePlist
+  userSystemdUnitPath
 } from "../src/cli/service.ts";
 import { DEFAULT_CONFIG } from "../src/config.ts";
 import type { ViserConfig } from "../src/core/types.ts";
@@ -28,424 +20,76 @@ const FAKE_TELEGRAM_TOKEN = `123456:${"abcdefghijklmnopqrstuvwxyzABCDE"}`;
 const FAKE_MODEL_API_KEY = `sk-${"1234567890abcdefghijklmnop"}`;
 import type { RunCommandOptions, RunCommandResult } from "../src/utils/exec.ts";
 
-test("generateLaunchdPlist points launchd at the restart-safe service runner", () => {
-  const config = serviceConfig("/tmp/viser-test");
-  const plist = generateLaunchdPlist(config, { nodePath: "/usr/local/bin/node" });
-  assert.match(plist, /<string>service-run<\/string>/);
-  assert.match(plist, /<string>--live<\/string>/);
-  assert.match(plist, /<string>--probe-all-providers<\/string>/);
-  assert.doesNotMatch(plist, /<string>gateway<\/string>/);
-  assert.doesNotMatch(plist, /<string>--strict<\/string>/);
-  assert.match(plist, /<key>KeepAlive<\/key>/);
-  assert.match(plist, /<key>SuccessfulExit<\/key>\s*<false\/>/);
-  assert.match(plist, /VISER_CONFIG/);
-  assert.match(plist, /<key>PATH<\/key>/);
-});
+test("service module no longer exports background service artifact creators", async () => {
+  const serviceModule = await import("../src/cli/service.ts");
+  const removedExports = [
+    "generateLaunchdPlist",
+    "generateSystemdUserService",
+    "generateWindowsServiceRunner",
+    "generateWindowsTaskXml",
+    "installLaunchAgentPlist",
+    "installSystemdService",
+    "installSystemdUserUnit",
+    "installWindowsService",
+    "servicePathValue",
+    "windowsRunnerPath",
+    "writeWorkspacePlist",
+    "writeWorkspaceSystemdService",
+    "writeWorkspaceWindowsService"
+  ];
 
-test("generateLaunchdPlist preserves an explicit VISER_ENV for launchd", () => {
-  const original = process.env.VISER_ENV;
-  try {
-    process.env.VISER_ENV = "/tmp/viser-test/prod.env";
-    const plist = generateLaunchdPlist(serviceConfig("/tmp/viser-test"), { nodePath: "/usr/local/bin/node" });
-
-    assert.match(plist, /<key>VISER_ENV<\/key>/);
-    assert.match(plist, /<string>\/tmp\/viser-test\/prod\.env<\/string>/);
-  } finally {
-    if (original === undefined) delete process.env.VISER_ENV;
-    else process.env.VISER_ENV = original;
+  for (const name of removedExports) {
+    assert.equal(name in serviceModule, false, `${name} must not be exported`);
   }
 });
 
-test("generateLaunchdPlist omits VISER_CONFIG when running with defaults only", () => {
-  const dir = "/tmp/viser-default-service";
-  const config: ViserConfig = {
-    ...DEFAULT_CONFIG,
-    assistant: { ...DEFAULT_CONFIG.assistant, workdir: dir },
-    storage: { dir: join(dir, ".viser") }
-  };
-
-  const plist = generateLaunchdPlist(config, { nodePath: "/usr/local/bin/node" });
-
-  assert.doesNotMatch(plist, /<key>VISER_CONFIG<\/key>/);
-  assert.doesNotMatch(plist, /viser\.config\.json/);
-  assert.match(plist, /<key>PATH<\/key>/);
-});
-
-test("generateLaunchdPlist preserves the loaded config path when one exists", () => {
-  const config = serviceConfig("/tmp/viser-config-service");
-  const plist = generateLaunchdPlist(config, { nodePath: "/usr/local/bin/node" });
-
-  assert.match(plist, /<key>VISER_CONFIG<\/key>/);
-  assert.match(plist, /<string>\/tmp\/viser-config-service\/viser\.config\.json<\/string>/);
-});
-
-test("generateLaunchdPlist filters transient sandbox paths from launchd PATH", () => {
-  const originalPath = process.env.PATH;
-  try {
-    process.env.PATH = [
-      "/Users/example/.codex/tmp/arg0/bin",
-      "/pkg/env/global/bin",
-      "/private/tmp/viser-bin",
-      "/opt/homebrew/bin",
-      "/opt/homebrew/bin",
-      "/usr/bin"
-    ].join(":");
-
-    const plist = generateLaunchdPlist(serviceConfig("/tmp/viser-test"), { nodePath: "/usr/local/bin/node" });
-    const pathValue = servicePathValue(process.env.PATH);
-
-    assert.doesNotMatch(plist, /\.codex\/tmp/);
-    assert.doesNotMatch(plist, /\/pkg\/env\/global\/bin/);
-    assert.doesNotMatch(plist, /\/private\/tmp\/viser-bin/);
-    assert.match(plist, /\/opt\/homebrew\/bin/);
-    assert.match(plist, /\/usr\/bin/);
-    assert.equal(pathValue.split(":").filter((entry) => entry === "/opt/homebrew/bin").length, 1);
-  } finally {
-    if (originalPath === undefined) delete process.env.PATH;
-    else process.env.PATH = originalPath;
-  }
-});
-
-test("generateSystemdUserService points systemd at the restart-safe service runner", () => {
-  const originalEnv = process.env.VISER_ENV;
-  try {
-    process.env.VISER_ENV = "/tmp/viser-systemd/prod.env";
-    const config = serviceConfig("/tmp/viser-systemd");
-    const unit = generateSystemdUserService(config, { nodePath: "/usr/bin/node" });
-
-    assert.match(userSystemdUnitPath(config), /\.config\/systemd\/user\/com\.mokky\.viser\.service$/);
-    assert.match(unit, /^\[Unit\]/m);
-    assert.match(unit, /^\[Service\]/m);
-    assert.match(unit, /^\[Install\]/m);
-    assert.match(unit, /ExecStart="\/usr\/bin\/node" "\/tmp\/viser-systemd\/src\/index\.ts" "service-run" "--live" "--probe-all-providers"/);
-    assert.match(unit, /Restart=on-failure/);
-    assert.match(unit, /Environment="VISER_CONFIG=\/tmp\/viser-systemd\/viser\.config\.json"/);
-    assert.match(unit, /Environment="VISER_ENV=\/tmp\/viser-systemd\/prod\.env"/);
-    assert.match(unit, /StandardOutput=append:\/tmp\/viser-systemd\/\.viser\/logs\/gateway\.out\.log/);
-    assert.doesNotMatch(unit, /<plist/);
-  } finally {
-    if (originalEnv === undefined) delete process.env.VISER_ENV;
-    else process.env.VISER_ENV = originalEnv;
-  }
-});
-
-test("writeWorkspaceSystemdService writes the user service unit under storage", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "viser-service-systemd-"));
+test("service artifact commands are disabled and do not create workspace service files", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-service-artifacts-disabled-"));
   try {
     const config = serviceConfig(dir);
-    const path = await writeWorkspaceSystemdService(config);
-    assert.equal(path.endsWith(".service"), true);
-    assert.equal((await stat(path)).mode & 0o777, 0o600);
-    assert.match(await readFile(path, "utf8"), /ExecStart=.*service-run/);
+    const commands = ["plist", "write-plist", "systemd", "write-systemd", "windows", "write-windows"];
 
-    const report = await serviceCommand(["write-systemd"], config);
-    assert.match(report, /Manual Linux systemd --user install/);
-    assert.match(report, /node src\/index.ts service check/);
-    assert.match(report, /systemctl --user daemon-reload/);
-    assert.match(report, /systemctl --user enable --now com\.mokky\.viser\.service/);
-    assert.match(report, /loginctl enable-linger/);
+    for (const command of commands) {
+      const report = await serviceCommand([command], config);
+      assert.match(report, new RegExp(`Viser service ${command}: disabled`));
+      assert.match(report, /foreground terminal window/);
+    }
+
+    await assert.rejects(() => readFile(join(config.storage.dir, "launchd", `${serviceLabel(config)}.plist`), "utf8"), /ENOENT/);
+    await assert.rejects(() => readFile(join(config.storage.dir, "systemd", `${serviceLabel(config)}.service`), "utf8"), /ENOENT/);
+    await assert.rejects(() => readFile(join(config.storage.dir, "windows", `${serviceLabel(config)}.task.xml`), "utf8"), /ENOENT/);
+    await assert.rejects(() => readFile(join(config.storage.dir, "windows", `${serviceLabel(config)}.ps1`), "utf8"), /ENOENT/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
 });
 
-test("writeWorkspaceSystemdService refuses symlinked service directories", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "viser-service-systemd-symlink-"));
+test("install and reinstall commands never call native service managers or preflight gates", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-service-install-disabled-"));
   try {
-    const config = serviceConfig(dir);
-    await mkdir(config.storage.dir, { recursive: true });
-    await mkdir(join(dir, "outside-systemd"));
-    await symlink(join(dir, "outside-systemd"), join(config.storage.dir, "systemd"));
-
-    await assert.rejects(() => writeWorkspaceSystemdService(config), /symlink/);
-    await assert.rejects(() => readFile(join(dir, "outside-systemd", "com.mokky.viser.service"), "utf8"), /ENOENT/);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-});
-
-test("installService installs Linux systemd user units after the live gate passes", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "viser-service-systemd-install-"));
-  const originalHome = process.env.HOME;
-  try {
-    const home = join(dir, "home");
-    await mkdir(home, { recursive: true });
-    process.env.HOME = home;
     const config = serviceConfig(dir);
     const calls: RunCommandOptions[] = [];
-
-    const report = await installService(config, {
-      platform: "linux",
-      preflightRunner: async () => ({ ok: true, report: "gate ok" }),
-      runner: async (command) => {
+    let preflightCalls = 0;
+    const options = {
+      platform: "linux" as const,
+      preflightRunner: async () => {
+        preflightCalls += 1;
+        return { ok: true, report: "gate ok" };
+      },
+      runner: async (command: RunCommandOptions) => {
         calls.push(command);
-        return commandResult(`ran ${command.command} ${command.args.join(" ")}`);
-      }
-    });
-
-    const userUnit = userSystemdUnitPath(config);
-    assert.equal(userUnit.startsWith(home), true);
-    assert.match(await readFile(userUnit, "utf8"), /service-run/);
-    assert.equal((await stat(userUnit)).mode & 0o777, 0o600);
-    assert.deepEqual(calls.map((call) => [call.command, call.args]), [
-      ["systemctl", ["--user", "daemon-reload"]],
-      ["systemctl", ["--user", "enable", "--now", "com.mokky.viser.service"]]
-    ]);
-    assert.match(report, /service systemd install: ok/);
-    assert.match(report, /Installed .*com\.mokky\.viser\.service/);
-  } finally {
-    if (originalHome === undefined) delete process.env.HOME;
-    else process.env.HOME = originalHome;
-    await rm(dir, { recursive: true, force: true });
-  }
-});
-
-test("installService does not copy Linux systemd units when the live gate blocks", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "viser-service-systemd-blocked-"));
-  const originalHome = process.env.HOME;
-  try {
-    const home = join(dir, "home");
-    await mkdir(home, { recursive: true });
-    process.env.HOME = home;
-    const config = serviceConfig(dir);
-    let called = false;
-
-    const report = await installService(config, {
-      platform: "linux",
-      preflightRunner: async () => ({ ok: false, report: "gate blocked" }),
-      runner: async (command) => {
-        called = true;
         return commandResult(`unexpected ${command.command}`);
       }
-    });
+    };
 
-    assert.equal(called, false);
-    assert.match(report, /service install: blocked/);
-    assert.match(report, /gate blocked/);
+    const installReport = await installService(config, options);
+    const reinstallReport = await reinstallService(config, options);
+
+    assert.deepEqual(calls, []);
+    assert.equal(preflightCalls, 0);
+    assert.match(installReport, /Viser service install: disabled/);
+    assert.match(reinstallReport, /Viser service reinstall: disabled/);
     await assert.rejects(() => readFile(userSystemdUnitPath(config), "utf8"), /ENOENT/);
-  } finally {
-    if (originalHome === undefined) delete process.env.HOME;
-    else process.env.HOME = originalHome;
-    await rm(dir, { recursive: true, force: true });
-  }
-});
-
-test("generateWindowsTaskXml points Task Scheduler at a restart-safe PowerShell runner", () => {
-  const config = serviceConfig("C:/viser-windows");
-  const xml = generateWindowsTaskXml(config, {
-    powershellPath: "powershell.exe",
-    runnerPath: "C:/viser-windows/.viser/windows/com.mokky.viser.ps1"
-  });
-  const runner = generateWindowsServiceRunner(config, { nodePath: "C:/Program Files/nodejs/node.exe" });
-
-  assert.equal(windowsTaskUri(config), "\\KMokky\\Viser");
-  assert.match(xml, /<Task version="1\.4"/);
-  assert.match(xml, /<Author>KMokky<\/Author>/);
-  assert.match(xml, /<URI>\\KMokky\\Viser<\/URI>/);
-  assert.match(xml, /<LogonTrigger>/);
-  assert.match(xml, /<LogonType>InteractiveToken<\/LogonType>/);
-  assert.match(xml, /<RunLevel>LeastPrivilege<\/RunLevel>/);
-  assert.match(xml, /<Command>powershell\.exe<\/Command>/);
-  assert.match(xml, /-NoProfile -NonInteractive -File &quot;C:\/viser-windows\/\.viser\/windows\/com\.mokky\.viser\.ps1&quot;/);
-  assert.match(runner, /service-run' '--live' '--probe-all-providers'/);
-  assert.match(runner, /\$env:VISER_CONFIG = 'C:\/viser-windows\/viser\.config\.json'/);
-  assert.match(runner, /gateway\.out\.log/);
-  assert.match(runner, /gateway\.err\.log/);
-});
-
-test("writeWorkspaceWindowsService writes Task Scheduler XML and runner under storage", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "viser-service-windows-"));
-  try {
-    const config = serviceConfig(dir);
-    const artifacts = await writeWorkspaceWindowsService(config);
-    assert.equal(artifacts.taskXmlPath.endsWith(".task.xml"), true);
-    assert.equal(artifacts.runnerPath.endsWith(".ps1"), true);
-    assert.equal((await stat(artifacts.taskXmlPath)).mode & 0o777, 0o600);
-    assert.equal((await stat(artifacts.runnerPath)).mode & 0o777, 0o600);
-    assert.match(await readFile(artifacts.taskXmlPath, "utf8"), /<LogonTrigger>/);
-    assert.match(await readFile(artifacts.runnerPath, "utf8"), /service-run' '--live' '--probe-all-providers'/);
-
-    const report = await serviceCommand(["write-windows"], config);
-    assert.match(report, /Manual Windows Task Scheduler install/);
-    assert.match(report, /Register-ScheduledTask/);
-    assert.match(report, /Start-ScheduledTask/);
-    assert.match(report, /node src\/index.ts service check/);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-});
-
-test("writeWorkspaceWindowsService refuses symlinked service directories", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "viser-service-windows-symlink-"));
-  try {
-    const config = serviceConfig(dir);
-    await mkdir(config.storage.dir, { recursive: true });
-    await mkdir(join(dir, "outside-windows"));
-    await symlink(join(dir, "outside-windows"), join(config.storage.dir, "windows"));
-
-    await assert.rejects(() => writeWorkspaceWindowsService(config), /symlink/);
-    await assert.rejects(() => readFile(join(dir, "outside-windows", "com.mokky.viser.task.xml"), "utf8"), /ENOENT/);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-});
-
-test("installService registers Windows Task Scheduler tasks after the live gate passes", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "viser-service-windows-install-"));
-  try {
-    const config = serviceConfig(dir);
-    const calls: RunCommandOptions[] = [];
-
-    const report = await installService(config, {
-      platform: "win32",
-      preflightRunner: async () => ({ ok: true, report: "gate ok" }),
-      runner: async (command) => {
-        calls.push(command);
-        return commandResult(`ran ${command.command}`);
-      }
-    });
-
-    assert.equal(calls.length, 1);
-    assert.equal(calls[0].command, "powershell.exe");
-    assert.match(calls[0].args.join("\n"), /Register-ScheduledTask/);
-    assert.match(calls[0].args.join("\n"), /Start-ScheduledTask/);
-    assert.match(await readFile(join(config.storage.dir, "windows", "com.mokky.viser.task.xml"), "utf8"), /<LogonTrigger>/);
-    assert.match(await readFile(join(config.storage.dir, "windows", "com.mokky.viser.ps1"), "utf8"), /service-run/);
-    assert.match(report, /service windows task install: ok/);
-    assert.match(report, /Registered \\KMokky\\Viser/);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-});
-
-test("writeWorkspacePlist writes the launchd plist under storage", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "viser-service-"));
-  try {
-    const config = serviceConfig(dir);
-    const path = await writeWorkspacePlist(config);
-    assert.equal(path.endsWith(".plist"), true);
-    assert.equal((await stat(path)).mode & 0o777, 0o600);
-    assert.equal((await stat(join(config.storage.dir, "logs"))).mode & 0o777, 0o700);
-    assert.equal((await stat(join(config.storage.dir, "logs", "gateway.out.log"))).mode & 0o777, 0o600);
-    assert.equal((await stat(join(config.storage.dir, "logs", "gateway.err.log"))).mode & 0o777, 0o600);
-    const report = await serviceCommand(["write-plist"], config);
-    assert.match(report, /Before installing:/);
-    assert.match(report, /Recommended secure install:/);
-    assert.match(report, /node src\/index.ts service check/);
-    assert.match(report, /destination is not a symlink/);
-    assert.match(report, /chmod 600/);
-    assert.match(report, /node src\/index.ts service reinstall/);
-    assert.match(report, /node src\/index.ts service logs/);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-});
-
-test("writeWorkspacePlist refuses symlinked service directories", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "viser-service-symlink-dir-"));
-  try {
-    const config = serviceConfig(dir);
-    await mkdir(config.storage.dir, { recursive: true });
-    await mkdir(join(dir, "outside-logs"));
-    await symlink(join(dir, "outside-logs"), join(config.storage.dir, "logs"));
-
-    await assert.rejects(() => writeWorkspacePlist(config), /symlink/);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-});
-
-test("writeWorkspacePlist refuses symlinked service storage parents", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "viser-service-storage-symlink-"));
-  try {
-    const config = serviceConfig(dir);
-    const outsideStorage = join(dir, "outside-storage");
-    await mkdir(outsideStorage);
-    await symlink(outsideStorage, config.storage.dir);
-
-    await assert.rejects(() => writeWorkspacePlist(config), /symlink/i);
-    await assert.rejects(() => readFile(join(outsideStorage, "launchd", "com.mokky.viser.plist"), "utf8"), /ENOENT/);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-});
-
-test("installLaunchAgentPlist writes private plists and refuses symlink targets", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "viser-service-install-plist-"));
-  try {
-    const workspacePlist = join(dir, "workspace.plist");
-    const launchAgents = join(dir, "LaunchAgents");
-    const userPlist = join(launchAgents, "com.mokky.viser.plist");
-    await writeFile(workspacePlist, "<plist>safe</plist>\n", "utf8");
-
-    await installLaunchAgentPlist(workspacePlist, userPlist);
-    assert.equal(await readFile(userPlist, "utf8"), "<plist>safe</plist>\n");
-    assert.equal((await stat(userPlist)).mode & 0o777, 0o600);
-
-    const outside = join(dir, "outside.plist");
-    await rm(userPlist);
-    await writeFile(outside, "outside-original\n", "utf8");
-    await symlink(outside, userPlist);
-
-    await assert.rejects(() => installLaunchAgentPlist(workspacePlist, userPlist), /symlink/);
-    assert.equal(await readFile(outside, "utf8"), "outside-original\n");
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-});
-
-test("installLaunchAgentPlist refuses symlinked LaunchAgents directories", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "viser-service-install-dir-"));
-  try {
-    const workspacePlist = join(dir, "workspace.plist");
-    const realLaunchAgents = join(dir, "real-launchagents");
-    const linkLaunchAgents = join(dir, "LaunchAgents");
-    await writeFile(workspacePlist, "<plist>safe</plist>\n", "utf8");
-    await mkdir(realLaunchAgents);
-    await symlink(realLaunchAgents, linkLaunchAgents);
-
-    await assert.rejects(() => installLaunchAgentPlist(workspacePlist, join(linkLaunchAgents, "com.mokky.viser.plist")), /symlink/);
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-});
-
-test("installLaunchAgentPlist refuses symlinked LaunchAgents parent components under HOME", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "viser-service-install-parent-symlink-"));
-  const originalHome = process.env.HOME;
-  try {
-    const home = join(dir, "home");
-    const outsideLibrary = join(dir, "outside-library");
-    const workspacePlist = join(dir, "workspace.plist");
-    await mkdir(home);
-    await mkdir(outsideLibrary);
-    await writeFile(workspacePlist, "<plist>safe</plist>\n", "utf8");
-    await symlink(outsideLibrary, join(home, "Library"));
-    process.env.HOME = home;
-
-    await assert.rejects(
-      () => installLaunchAgentPlist(workspacePlist, join(home, "Library", "LaunchAgents", "com.mokky.viser.plist")),
-      /symlink/i
-    );
-    await assert.rejects(() => readFile(join(outsideLibrary, "LaunchAgents", "com.mokky.viser.plist"), "utf8"), /ENOENT/);
-  } finally {
-    if (originalHome === undefined) delete process.env.HOME;
-    else process.env.HOME = originalHome;
-    await rm(dir, { recursive: true, force: true });
-  }
-});
-
-test("installLaunchAgentPlist refuses symlinked workspace plist sources", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "viser-service-install-source-symlink-"));
-  try {
-    const outsideSource = join(dir, "outside-source.plist");
-    const workspacePlist = join(dir, "workspace.plist");
-    const userPlist = join(dir, "LaunchAgents", "com.mokky.viser.plist");
-    await writeFile(outsideSource, "<plist>outside</plist>\n", "utf8");
-    await symlink(outsideSource, workspacePlist);
-
-    await assert.rejects(() => installLaunchAgentPlist(workspacePlist, userPlist), /symlink/i);
-    await assert.rejects(() => readFile(userPlist, "utf8"), /ENOENT/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -527,29 +171,27 @@ test("removeLaunchAgentPlist refuses symlinked LaunchAgents parent components un
   }
 });
 
-test("service help exposes check, reinstall, and logs recovery commands", async () => {
+test("service help exposes legacy cleanup commands and says background services are disabled", async () => {
   const report = await serviceCommand(["help"], serviceConfig("/tmp/viser-test"));
 
-  assert.match(report, /service check/);
-  assert.match(report, /service systemd/);
-  assert.match(report, /service write-systemd/);
-  assert.match(report, /service windows/);
-  assert.match(report, /service write-windows/);
-  assert.match(report, /service reinstall/);
+  assert.match(report, /background service install\/start\/restart\/service-run and artifact generation are disabled/);
+  assert.match(report, /service status/);
+  assert.match(report, /service stop/);
+  assert.match(report, /service uninstall/);
   assert.match(report, /service logs \[lines]/);
   assert.match(report, /service health/);
   assert.match(report, /service trim-logs/);
+  assert.match(report, /viser/);
 });
 
-test("service check runs the provider-proof no-start gate", async () => {
+test("service check is disabled instead of preparing background startup", async () => {
   const dir = await mkdtemp(join(tmpdir(), "viser-service-check-"));
   try {
     const report = await serviceCommand(["check"], serviceRuntimeConfig(dir));
 
-    assert.match(report, /Viser service check: PASS/);
-    assert.match(report, /mode: check-only/);
-    assert.match(report, /Viser preflight: PASS/);
-    assert.match(report, /service write-windows/);
+    assert.match(report, /Viser service check: disabled/);
+    assert.match(report, /foreground terminal window/);
+    assert.doesNotMatch(report, /Viser preflight/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -756,6 +398,7 @@ function serviceRuntimeConfig(dir: string): ViserConfig {
     assistant: { ...DEFAULT_CONFIG.assistant, defaultProvider: "echo", fallbackProviders: [], workdir: dir },
     storage: { dir: join(dir, ".viser") },
     memory: { ...DEFAULT_CONFIG.memory, dir: join(dir, ".viser", "memory") },
+    personalization: { ...DEFAULT_CONFIG.personalization, dir: join(dir, ".viser", "personalization") },
     skills: { ...DEFAULT_CONFIG.skills, dirs: [join(dir, "skills"), join(dir, ".viser", "skills")] },
     tools: { ...DEFAULT_CONFIG.tools, allowedReadRoots: [dir], shell: { ...DEFAULT_CONFIG.tools.shell } },
     scheduler: { ...DEFAULT_CONFIG.scheduler, dir: join(dir, ".viser", "scheduler") },
@@ -764,7 +407,37 @@ function serviceRuntimeConfig(dir: string): ViserConfig {
     actions: { ...DEFAULT_CONFIG.actions, dir: join(dir, ".viser", "actions"), allowedWriteRoots: [dir] },
     connectors: {
       telegram: { ...DEFAULT_CONFIG.connectors.telegram, allowedChatIds: [], defaultChatIds: [] },
-      discord: { ...DEFAULT_CONFIG.connectors.discord, allowedChannelIds: [], defaultChannelIds: [] }
+      discord: { ...DEFAULT_CONFIG.connectors.discord, allowedChannelIds: [], defaultChannelIds: [] },
+      slack: { ...DEFAULT_CONFIG.connectors.slack, allowedChannelIds: [], defaultChannelIds: [] },
+      matrix: { ...DEFAULT_CONFIG.connectors.matrix, allowedRoomIds: [], defaultRoomIds: [] },
+      signal: { ...DEFAULT_CONFIG.connectors.signal, allowedRecipientIds: [], defaultRecipientIds: [] },
+      imessage: { ...DEFAULT_CONFIG.connectors.imessage, allowedHandleIds: [], defaultHandleIds: [] },
+      whatsapp: { ...DEFAULT_CONFIG.connectors.whatsapp, allowedRecipientIds: [], defaultRecipientIds: [] },
+      line: { ...DEFAULT_CONFIG.connectors.line, allowedPeerIds: [], defaultPeerIds: [] },
+      kakaotalk: { ...DEFAULT_CONFIG.connectors.kakaotalk, allowedUserIds: [], defaultUserIds: [] },
+      googleChat: { ...DEFAULT_CONFIG.connectors.googleChat, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      webhook: { ...DEFAULT_CONFIG.connectors.webhook, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      homeAssistant: { ...DEFAULT_CONFIG.connectors.homeAssistant, baseUrl: undefined, accessToken: undefined, service: undefined, services: {}, allowedServiceIds: [], defaultServiceIds: [] },
+      teams: { ...DEFAULT_CONFIG.connectors.teams, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      mattermost: { ...DEFAULT_CONFIG.connectors.mattermost, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      synologyChat: { ...DEFAULT_CONFIG.connectors.synologyChat, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      rocketChat: { ...DEFAULT_CONFIG.connectors.rocketChat, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      feishu: { ...DEFAULT_CONFIG.connectors.feishu, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      dingtalk: { ...DEFAULT_CONFIG.connectors.dingtalk, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      wecom: { ...DEFAULT_CONFIG.connectors.wecom, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      zalo: { ...DEFAULT_CONFIG.connectors.zalo, accessToken: undefined, recipient: undefined, recipients: {}, allowedRecipientIds: [], defaultRecipientIds: [] },
+      irc: { ...DEFAULT_CONFIG.connectors.irc, host: undefined, nick: undefined, password: undefined, channel: undefined, channels: {}, allowedChannelIds: [], defaultChannelIds: [] },
+      twitch: { ...DEFAULT_CONFIG.connectors.twitch, enabled: false, accessToken: undefined, botUsername: undefined, channel: undefined, channels: {}, allowedChannelIds: [], defaultChannelIds: [] },
+      ntfy: { ...DEFAULT_CONFIG.connectors.ntfy, enabled: false, token: undefined, topic: undefined, topics: {}, allowedTopicIds: [], defaultTopicIds: [] },
+      mastodon: { ...DEFAULT_CONFIG.connectors.mastodon, enabled: false, baseUrl: undefined, accessToken: undefined, visibility: "private", targets: {}, allowedTargetIds: [], defaultTargetIds: [] },
+      nextcloudTalk: { ...DEFAULT_CONFIG.connectors.nextcloudTalk, baseUrl: undefined, username: undefined, appPassword: undefined, roomToken: undefined, rooms: {}, allowedRoomIds: [], defaultRoomIds: [] },
+      webex: { ...DEFAULT_CONFIG.connectors.webex, accessToken: undefined, allowedRoomIds: [], defaultRoomIds: [] },
+      zulip: { ...DEFAULT_CONFIG.connectors.zulip, siteUrl: undefined, botEmail: undefined, apiKey: undefined, target: undefined, targets: {}, allowedTargetIds: [], defaultTargetIds: [] },
+      email: { ...DEFAULT_CONFIG.connectors.email, enabled: false, from: undefined, recipient: undefined, recipients: {}, allowedRecipientIds: [], defaultRecipientIds: [] },
+      github: { ...DEFAULT_CONFIG.connectors.github, enabled: false, token: undefined, target: undefined, targets: {}, allowedTargetIds: [], defaultTargetIds: [] },
+      todoist: { ...DEFAULT_CONFIG.connectors.todoist, enabled: false, token: undefined, project: undefined, projects: {}, allowedProjectIds: [], defaultProjectIds: [] },
+      notion: { ...DEFAULT_CONFIG.connectors.notion, enabled: false, token: undefined, page: undefined, pages: {}, allowedPageIds: [], defaultPageIds: [] },
+      obsidian: { ...DEFAULT_CONFIG.connectors.obsidian, enabled: false, vaultDir: undefined, note: undefined, notes: {}, allowedNoteIds: [], defaultNoteIds: [] }
     },
     providers: {
       echo: {

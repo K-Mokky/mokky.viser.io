@@ -9,7 +9,34 @@ import type { AccessConfig } from "../src/core/types.ts";
 test("normalizeCode and parseConnector normalize access inputs", () => {
   assert.equal(normalizeCode(" abcd "), "ABCD");
   assert.equal(parseConnector("telegram"), "telegram");
-  assert.equal(parseConnector("slack"), undefined);
+  assert.equal(parseConnector("slack"), "slack");
+  assert.equal(parseConnector("matrix"), "matrix");
+  assert.equal(parseConnector("signal"), "signal");
+  assert.equal(parseConnector("imessage"), "imessage");
+  assert.equal(parseConnector("whatsapp"), "whatsapp");
+  assert.equal(parseConnector("line"), "line");
+  assert.equal(parseConnector("google-chat"), "google-chat");
+  assert.equal(parseConnector("webhook"), "webhook");
+  assert.equal(parseConnector("home-assistant"), "home-assistant");
+  assert.equal(parseConnector("teams"), "teams");
+  assert.equal(parseConnector("mattermost"), "mattermost");
+  assert.equal(parseConnector("synology-chat"), "synology-chat");
+  assert.equal(parseConnector("rocket-chat"), "rocket-chat");
+  assert.equal(parseConnector("feishu"), "feishu");
+  assert.equal(parseConnector("dingtalk"), "dingtalk");
+  assert.equal(parseConnector("wecom"), "wecom");
+  assert.equal(parseConnector("zalo"), "zalo");
+  assert.equal(parseConnector("irc"), "irc");
+  assert.equal(parseConnector("ntfy"), "ntfy");
+  assert.equal(parseConnector("mastodon"), "mastodon");
+  assert.equal(parseConnector("nextcloud-talk"), "nextcloud-talk");
+  assert.equal(parseConnector("webex"), "webex");
+  assert.equal(parseConnector("zulip"), "zulip");
+  assert.equal(parseConnector("github"), "github");
+  assert.equal(parseConnector("todoist"), "todoist");
+  assert.equal(parseConnector("notion"), "notion");
+  assert.equal(parseConnector("obsidian"), "obsidian");
+  assert.equal(parseConnector("unknown"), undefined);
 });
 
 test("AccessStore pairs a connector id with a one-time code", async () => {

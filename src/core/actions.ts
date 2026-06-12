@@ -22,7 +22,8 @@ import {
 } from "../utils/files.ts";
 import { nowIso } from "../utils/text.ts";
 import { commandExists, runCommand } from "../utils/exec.ts";
-import type { AccessConnector, ActionConfig, PendingAction } from "./types.ts";
+import { fetchWithTimeout, type FetchLike } from "../utils/fetch.ts";
+import type { AccessConnector, ActionConfig, BrowserTaskActionConfig, BrowserTaskProvider, PendingAction } from "./types.ts";
 
 export interface ActionStoreOptions {
   openUrl?: (url: string) => Promise<void>;
@@ -31,6 +32,7 @@ export interface ActionStoreOptions {
   notifyDesktop?: (notification: DesktopNotificationProposal) => Promise<void>;
   copyToClipboard?: (text: string) => Promise<void>;
   sendConnectorMessage?: (message: ConnectorMessageProposal) => Promise<void>;
+  runBrowserTask?: (task: BrowserTaskProposal) => Promise<BrowserTaskResult>;
 }
 
 export interface CalendarEventProposal {
@@ -57,6 +59,36 @@ export interface ConnectorMessageProposal {
   text: string;
 }
 
+export interface BrowserTaskProposal {
+  provider: BrowserTaskProvider;
+  task: string;
+  allowedDomains: string[];
+  maxAgentSteps: number;
+}
+
+export interface BrowserTaskResult {
+  id: string;
+  sessionId?: string;
+  url?: string;
+  title?: string;
+  text?: string;
+}
+
+interface BrowserTaskProof {
+  id: string;
+  actionId: string;
+  provider: BrowserTaskProvider;
+  allowedDomains: string[];
+  maxAgentSteps: number;
+  resultId: string;
+  sessionId?: string;
+  urlHost?: string;
+  urlProtocol?: string;
+  titleBytes: number;
+  textBytes: number;
+  createdAt: string;
+}
+
 export class ActionStore {
   private config: ActionConfig;
   private openUrl: (url: string) => Promise<void>;
@@ -65,6 +97,7 @@ export class ActionStore {
   private notifyDesktop: (notification: DesktopNotificationProposal) => Promise<void>;
   private copyToClipboard: (text: string) => Promise<void>;
   private sendConnectorMessage: (message: ConnectorMessageProposal) => Promise<void>;
+  private runBrowserTask: (task: BrowserTaskProposal) => Promise<BrowserTaskResult>;
 
   constructor(config: ActionConfig, options: ActionStoreOptions = {}) {
     this.config = config;
@@ -74,11 +107,18 @@ export class ActionStore {
     this.notifyDesktop = options.notifyDesktop ?? notifyDesktopWithSystem;
     this.copyToClipboard = options.copyToClipboard ?? copyTextToClipboardWithSystem;
     this.sendConnectorMessage = options.sendConnectorMessage ?? missingConnectorMessageSender;
+    this.runBrowserTask = options.runBrowserTask ?? ((task) => runConfiguredBrowserTask(this.config.browserTask, task));
   }
 
   async propose(raw: string, source: string): Promise<PendingAction> {
     if (!this.config.enabled) throw new Error("Actions are disabled in config.");
     const proposal = parseActionProposal(raw);
+    if (proposal.type === "browser-task") {
+      const task = parseBrowserTaskContent(proposal.content);
+      const configuredTask = normalizeBrowserTaskProposal(task.task, task.allowedDomains, task.maxAgentSteps, this.config.browserTask.provider);
+      proposal.path = browserTaskTarget(configuredTask);
+      proposal.content = JSON.stringify(configuredTask);
+    }
     const contentBytes = Buffer.byteLength(proposal.content, "utf8");
     if (contentBytes > this.config.maxWriteBytes) {
       throw new Error(`Action content is too large (${contentBytes} > ${this.config.maxWriteBytes} bytes).`);
@@ -99,7 +139,13 @@ export class ActionStore {
                 ? proposal.path
                 : proposal.type === "connector-message"
                   ? connectorMessageTarget(parseConnectorMessageContent(proposal.content))
+                  : proposal.type === "browser-task"
+                    ? browserTaskTarget(parseBrowserTaskContent(proposal.content))
                   : await this.resolveAllowedWritePath(proposal.path, { allowMissing: true });
+    if (proposal.type === "browser-task" && !this.config.browserTask.enabled) {
+      throw new Error("Browser task actions are disabled in config. Enable actions.browserTask.enabled and set BROWSER_USE_API_KEY before approving cloud browser automation.");
+    }
+    if (proposal.type === "browser-task") assertBrowserTaskAllowedByConfig(parseBrowserTaskContent(proposal.content), this.config.browserTask);
     if (isFileActionType(proposal.type)) await assertNoSymlinkWritePath(targetPath, this.config.allowedWriteRoots);
     const action: PendingAction = {
       id,
@@ -221,6 +267,16 @@ export class ActionStore {
       return;
     }
 
+    if (action.type === "browser-task") {
+      const task = parseBrowserTaskContent(action.content);
+      if (browserTaskTarget(task) !== action.targetPath) {
+        throw new Error("Browser task target does not match persisted content.");
+      }
+      const result = await this.runBrowserTask(task);
+      await this.appendBrowserTaskProof(action, task, result);
+      return;
+    }
+
     await this.resolveAllowedWritePath(action.targetPath, { allowMissing: true });
     await ensureActionTargetDirectory(dirname(action.targetPath), this.config.allowedWriteRoots);
     await this.resolveAllowedWritePath(action.targetPath, { allowMissing: true });
@@ -292,6 +348,37 @@ export class ActionStore {
   private actionsPath(): string {
     return join(this.config.dir, "actions.json");
   }
+
+  private async appendBrowserTaskProof(action: PendingAction, task: BrowserTaskProposal, result: BrowserTaskResult): Promise<void> {
+    const resultUrl = safeBrowserTaskProofUrl(result.url);
+    const proof: BrowserTaskProof = {
+      id: randomUUID().slice(0, 12),
+      actionId: action.id,
+      provider: task.provider,
+      allowedDomains: task.allowedDomains,
+      maxAgentSteps: task.maxAgentSteps,
+      resultId: result.id,
+      ...(result.sessionId ? { sessionId: result.sessionId } : {}),
+      ...(resultUrl ? { urlHost: resultUrl.hostname, urlProtocol: resultUrl.protocol } : {}),
+      titleBytes: Buffer.byteLength(result.title ?? "", "utf8"),
+      textBytes: Buffer.byteLength(result.text ?? "", "utf8"),
+      createdAt: nowIso()
+    };
+    await ensurePrivateDir(this.config.dir);
+    await appendPrivateFile(join(this.config.dir, "browser-task-proofs.jsonl"), `${JSON.stringify(proof)}\n`);
+  }
+}
+
+function safeBrowserTaskProofUrl(raw: string | undefined): URL | undefined {
+  if (!raw) return undefined;
+  try {
+    const parsed = new URL(raw);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return undefined;
+    if (parsed.username || parsed.password) return undefined;
+    return parsed;
+  } catch {
+    return undefined;
+  }
 }
 
 async function assertSafeActionWriteRoot(root: string): Promise<void> {
@@ -339,20 +426,33 @@ export function parseActionProposal(raw: string): { type: PendingAction["type"];
     return { type: "clipboard", path: "local-clipboard", content: normalizeClipboardText(rest) };
   }
 
-  const [path, ...contentParts] = parts;
   if (type === "connector-message" || type === "send-message" || type === "message") {
     const message = parseConnectorMessageInput(rest);
     return { type: "connector-message", path: connectorMessageTarget(message), content: JSON.stringify(message) };
   }
 
-  if (type !== "write-file" && type !== "append-file" && type !== "open-url") {
-    throw new Error("Usage: /propose write-file <path> <content> OR /propose append-file <path> <content> OR /propose open-url <https-url|mailto-url> [note] OR /propose speak <text> OR /propose calendar-event <ISO-start> <duration-minutes> <title> OR /propose mail-draft <to> | <subject> | <body> OR /propose notify <title> | <body> OR /propose clipboard <text> OR /propose message telegram:<chat-id>|discord:<channel-id> | <text>");
+  if (type === "browser-task" || type === "browser-use-task") {
+    const task = parseBrowserTaskInput(rest);
+    return { type: "browser-task", path: browserTaskTarget(task), content: JSON.stringify(task) };
   }
+
+  if (type !== "write-file" && type !== "append-file" && type !== "open-url") {
+    throw new Error("Usage: /propose write-file <path> <content> OR /propose append-file <path> <content> OR /propose open-url <https-url|mailto-url> [note] OR /propose speak <text> OR /propose calendar-event <ISO-start> <duration-minutes> <title> OR /propose mail-draft <to> | <subject> | <body> OR /propose notify <title> | <body> OR /propose clipboard <text> OR /propose browser-task <task> | domains=<public-domain[,domain]> [| maxSteps=<1-300>] OR /propose message telegram:<chat-id>|discord:<channel-id>|slack:<channel-id>|matrix:<room-id>|signal:<recipient-id>|imessage:<handle-id>|whatsapp:<recipient-id>|line:<peer-id>|google-chat:<webhook-id>|webhook:<webhook-id>|home-assistant:<service-alias>|teams:<webhook-id>|mattermost:<webhook-id>|synology-chat:<webhook-id>|rocket-chat:<webhook-id>|feishu:<webhook-id>|dingtalk:<webhook-id>|wecom:<webhook-id>|zalo:<recipient-alias>|irc:<channel-alias>|twitch:<channel-alias>|ntfy:<topic-alias>|mastodon:<target-alias>|nextcloud-talk:<room-alias>|webex:<room-id>|zulip:<target-id>|email:<recipient-alias>|github:<issue-target-alias>|todoist:<project-alias>|notion:<page-alias>|obsidian:<note-alias> | <text>");
+  }
+  const { first: path, rest: content } = splitFirstToken(rest);
   if (!path) throw new Error("Action target path is required.");
-  const content = contentParts.join(" ");
   if (type === "open-url") return { type, path, content: content || "Open external URL after explicit approval." };
   if (!content) throw new Error("Action content is required.");
   return { type, path, content };
+}
+
+function splitFirstToken(input: string): { first: string; rest: string } {
+  const trimmedStart = input.replace(/^\s+/u, "");
+  const match = /^(\S+)(?:\s+([\s\S]*))?$/u.exec(trimmedStart);
+  return {
+    first: match?.[1] ?? "",
+    rest: (match?.[2] ?? "").trim()
+  };
 }
 
 export function normalizeSpeechText(raw: string): string {
@@ -502,21 +602,131 @@ function parseConnectorMessageInput(input: string): ConnectorMessageProposal {
 
   const parts = trimmed.split(/\s+\|\s+/u);
   if (parts.length !== 2) {
-    throw new Error("Usage: /propose message telegram:<chat-id>|discord:<channel-id> | <text>");
+    throw new Error("Usage: /propose message telegram:<chat-id>|discord:<channel-id>|slack:<channel-id>|matrix:<room-id>|signal:<recipient-id>|imessage:<handle-id>|whatsapp:<recipient-id>|line:<peer-id>|google-chat:<webhook-id>|webhook:<webhook-id>|home-assistant:<service-alias>|teams:<webhook-id>|mattermost:<webhook-id>|synology-chat:<webhook-id>|rocket-chat:<webhook-id>|feishu:<webhook-id>|dingtalk:<webhook-id>|wecom:<webhook-id>|zalo:<recipient-alias>|irc:<channel-alias>|twitch:<channel-alias>|ntfy:<topic-alias>|mastodon:<target-alias>|nextcloud-talk:<room-alias>|webex:<room-id>|zulip:<target-id>|email:<recipient-alias>|github:<issue-target-alias>|todoist:<project-alias>|notion:<page-alias>|obsidian:<note-alias> | <text>");
   }
   return normalizeConnectorMessageProposal(parts[0], parts[1]);
+}
+
+function parseBrowserTaskInput(input: string): BrowserTaskProposal {
+  const trimmed = input.trim();
+  if (!trimmed) throw new Error("Browser task input is required.");
+  if (trimmed.startsWith("{")) return parseBrowserTaskContent(trimmed);
+
+  const parts = trimmed.split(/\s+\|\s+/u).map((part) => part.trim()).filter(Boolean);
+  const task = parts.shift() ?? "";
+  let domains: string[] = [];
+  let maxAgentSteps = 25;
+  let provider: BrowserTaskProvider = "browser-use-cloud";
+  for (const part of parts) {
+    const separator = part.indexOf("=");
+    if (separator <= 0) throw new Error("Browser task options must look like domains=example.com[,example.org], maxSteps=25, or provider=browserbase-session.");
+    const key = part.slice(0, separator).trim().toLowerCase();
+    const value = part.slice(separator + 1).trim();
+    if (key === "domains" || key === "alloweddomains" || key === "allowed-domains") {
+      domains = value.split(",").map((domain) => domain.trim()).filter(Boolean);
+    } else if (key === "maxsteps" || key === "max-agent-steps" || key === "maxagentsteps") {
+      maxAgentSteps = Number(value);
+    } else if (key === "provider") {
+      if (!isBrowserTaskProvider(value)) {
+        throw new Error("Browser task provider must be browser-use-cloud, local-cdp, browserbase-session, or firecrawl-interact.");
+      }
+      provider = value;
+    } else {
+      throw new Error(`Unsupported browser task option: ${key}`);
+    }
+  }
+  return normalizeBrowserTaskProposal(task, domains, maxAgentSteps, provider);
+}
+
+export function parseBrowserTaskContent(content: string): BrowserTaskProposal {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(content);
+  } catch {
+    throw new Error("Browser task content must be JSON.");
+  }
+  if (!parsed || typeof parsed !== "object") throw new Error("Browser task content must be an object.");
+  const data = parsed as Record<string, unknown>;
+  const domains = Array.isArray(data.allowedDomains) ? data.allowedDomains : [];
+  const provider = typeof data.provider === "string" && isBrowserTaskProvider(data.provider) ? data.provider : "browser-use-cloud";
+  return normalizeBrowserTaskProposal(
+    typeof data.task === "string" ? data.task : "",
+    domains.map((domain) => typeof domain === "string" ? domain : ""),
+    typeof data.maxAgentSteps === "number" ? data.maxAgentSteps : 25,
+    provider
+  );
+}
+
+export function normalizeBrowserTaskProposal(task: string, allowedDomains: string[], maxAgentSteps: number, provider: BrowserTaskProvider = "browser-use-cloud"): BrowserTaskProposal {
+  if (!isBrowserTaskProvider(provider)) throw new Error("Browser task provider must be browser-use-cloud, local-cdp, browserbase-session, or firecrawl-interact.");
+  const normalizedTask = normalizeBrowserTaskText(task);
+  const domains = [...new Set(allowedDomains.map(normalizeBrowserTaskDomain))];
+  if (domains.length === 0) {
+    throw new Error("Browser task must include at least one public allowed domain.");
+  }
+  if (!Number.isInteger(maxAgentSteps) || maxAgentSteps < 1 || maxAgentSteps > 300) {
+    throw new Error("Browser task maxSteps must be an integer between 1 and 300.");
+  }
+  return { provider, task: normalizedTask, allowedDomains: domains, maxAgentSteps };
+}
+
+function isBrowserTaskProvider(value: string): value is BrowserTaskProvider {
+  return value === "browser-use-cloud" || value === "local-cdp" || value === "browserbase-session" || value === "firecrawl-interact";
+}
+
+function normalizeBrowserTaskText(raw: string): string {
+  if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(raw)) throw new Error("Browser task contains control characters.");
+  const value = raw.trim().replace(/\s+/gu, " ");
+  if (!value) throw new Error("Browser task is required.");
+  if (value.length > 4000) throw new Error("Browser task is too long.");
+  return value;
+}
+
+function normalizeBrowserTaskDomain(raw: string): string {
+  const value = raw.trim();
+  if (!value) throw new Error("Browser task allowed domain is required.");
+  let host = value;
+  if (/^https?:\/\//iu.test(value)) {
+    const url = new URL(value);
+    if (url.username || url.password) throw new Error("Browser task allowed domain must not include credentials.");
+    host = url.hostname;
+  }
+  const domain = host.toLowerCase().replace(/\.$/u, "");
+  if (!domain || domain.length > 253 || domain.includes("/") || domain.includes(":") || domain.includes("@")) {
+    throw new Error("Browser task allowed domain must be a hostname without scheme, path, port, or credentials.");
+  }
+  if (isUnsafeBrowserTaskHost(domain)) {
+    throw new Error("Browser task allowed domain must be public; localhost, private IPs, .local, .lan, .internal, and single-label hosts are blocked.");
+  }
+  return domain;
+}
+
+function isUnsafeBrowserTaskHost(host: string): boolean {
+  const value = host.trim().toLowerCase().replace(/\.$/u, "");
+  if (!value || value === "localhost" || value.endsWith(".local") || value.endsWith(".lan") || value.endsWith(".internal")) return true;
+  if (!value.includes(".")) return true;
+  const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/u.exec(value);
+  if (!ipv4) return false;
+  const octets = ipv4.slice(1).map((part) => Number(part));
+  if (octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) return true;
+  const [a, b] = octets;
+  return a === 0 || a === 10 || a === 127 || a >= 224 || (a === 100 && b >= 64 && b <= 127) || (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168);
+}
+
+function browserTaskTarget(task: BrowserTaskProposal): string {
+  return `${task.provider}:${task.allowedDomains.join(",")}`;
 }
 
 function normalizeConnectorTarget(raw: string): { connector: AccessConnector; targetId: string } {
   const value = raw.trim();
   const separator = value.indexOf(":");
   if (separator <= 0 || separator === value.length - 1) {
-    throw new Error("Connector message target must look like telegram:<chat-id> or discord:<channel-id>.");
+    throw new Error("Connector message target must look like telegram:<chat-id>, discord:<channel-id>, slack:<channel-id>, matrix:<room-id>, signal:<recipient-id>, imessage:<handle-id>, whatsapp:<recipient-id>, line:<peer-id>, google-chat:<webhook-id>, webhook:<webhook-id>, home-assistant:<service-alias>, teams:<webhook-id>, mattermost:<webhook-id>, synology-chat:<webhook-id>, rocket-chat:<webhook-id>, feishu:<webhook-id>, dingtalk:<webhook-id>, wecom:<webhook-id>, zalo:<recipient-alias>, irc:<channel-alias>, twitch:<channel-alias>, ntfy:<topic-alias>, mastodon:<target-alias>, nextcloud-talk:<room-alias>, webex:<room-id>, zulip:<target-id>, email:<recipient-alias>, github:<issue-target-alias>, todoist:<project-alias>, notion:<page-alias>, or obsidian:<note-alias>.");
   }
   const connector = value.slice(0, separator);
   const targetId = value.slice(separator + 1).trim();
-  if (connector !== "telegram" && connector !== "discord") {
-    throw new Error("Connector message target must use telegram or discord.");
+  if (connector !== "telegram" && connector !== "discord" && connector !== "slack" && connector !== "matrix" && connector !== "signal" && connector !== "imessage" && connector !== "whatsapp" && connector !== "line" && connector !== "google-chat" && connector !== "webhook" && connector !== "home-assistant" && connector !== "teams" && connector !== "mattermost" && connector !== "synology-chat" && connector !== "rocket-chat" && connector !== "feishu" && connector !== "dingtalk" && connector !== "wecom" && connector !== "zalo" && connector !== "irc" && connector !== "twitch" && connector !== "ntfy" && connector !== "mastodon" && connector !== "nextcloud-talk" && connector !== "webex" && connector !== "zulip" && connector !== "email" && connector !== "github" && connector !== "todoist" && connector !== "notion" && connector !== "obsidian") {
+    throw new Error("Connector message target must use telegram, discord, slack, matrix, signal, imessage, whatsapp, line, google-chat, webhook, home-assistant, teams, mattermost, synology-chat, rocket-chat, feishu, dingtalk, wecom, zalo, irc, twitch, ntfy, mastodon, nextcloud-talk, webex, zulip, email, github, todoist, notion, or obsidian.");
   }
   return { connector, targetId: normalizeConnectorTargetId(connector, targetId) };
 }
@@ -526,9 +736,76 @@ function normalizeConnectorTargetId(connector: AccessConnector, raw: string): st
   if (!value) throw new Error("Connector message target id is required.");
   if (connector === "telegram" && (/^-?\d{1,32}$/u.test(value) || /^@[A-Za-z0-9_]{5,64}$/u.test(value))) return value;
   if (connector === "discord" && /^\d{5,32}$/u.test(value)) return value;
+  if (connector === "slack" && /^[CDGU][A-Z0-9]{5,32}$/u.test(value)) return value;
+  if (connector === "matrix" && /^[!#][^\s:/?#]+:[^\s/]{1,200}$/u.test(value)) return value;
+  if (connector === "signal" && (/^\+[1-9]\d{4,19}$/u.test(value) || /^[1-9]\d{4,19}$/u.test(value))) return value.startsWith("+") ? value : `+${value}`;
+  if (connector === "imessage" && (/^\+[1-9]\d{4,19}$/u.test(value) || /^[1-9]\d{4,19}$/u.test(value))) return value.startsWith("+") ? value : `+${value}`;
+  if (connector === "whatsapp" && (/^\+[1-9]\d{4,19}$/u.test(value) || /^[1-9]\d{4,19}$/u.test(value))) return value.startsWith("+") ? value : `+${value}`;
+  if (connector === "line" && /^[A-Za-z0-9._-]{1,128}$/u.test(value)) return value;
+  if (connector === "imessage" && /^[^@\s]+@[^@\s]+\.[^@\s]+$/u.test(value) && value.length <= 200) return value.toLowerCase();
+  if ((connector === "google-chat" || connector === "webhook" || connector === "home-assistant" || connector === "teams" || connector === "mattermost" || connector === "synology-chat" || connector === "rocket-chat" || connector === "feishu" || connector === "dingtalk" || connector === "wecom" || connector === "zalo" || connector === "irc" || connector === "twitch" || connector === "ntfy" || connector === "mastodon" || connector === "nextcloud-talk" || connector === "zulip" || connector === "email" || connector === "github" || connector === "todoist" || connector === "notion" || connector === "obsidian") && /^[A-Za-z0-9._-]{1,80}$/u.test(value)) return value.toLowerCase();
+  if (connector === "webex" && /^[A-Za-z0-9._-]{10,512}$/u.test(value)) return value;
   throw new Error(connector === "telegram"
     ? "Telegram target id must be a numeric chat id or @channel username."
-    : "Discord target id must be a numeric channel id.");
+    : connector === "discord"
+      ? "Discord target id must be a numeric channel id."
+      : connector === "slack"
+        ? "Slack target id must be a Slack channel, group, DM, or user id such as C123456."
+        : connector === "matrix"
+          ? "Matrix target id must be a Matrix room id or alias such as !roomid:example.org."
+          : connector === "signal"
+            ? "Signal target id must be an E.164 phone number such as +15551234567."
+            : connector === "imessage"
+              ? "iMessage target id must be an E.164 phone number or email handle."
+              : connector === "whatsapp"
+                ? "WhatsApp target id must be an E.164 phone number such as +15551234567."
+                : connector === "line"
+                  ? "LINE target id must be a LINE userId, groupId, roomId, or configured alias value."
+                  : connector === "google-chat"
+                    ? "Google Chat target id must be a webhook alias such as default or ops."
+                    : connector === "webhook"
+                      ? "Generic webhook target id must be a webhook alias such as default or ops."
+                      : connector === "home-assistant"
+                      ? "Home Assistant target id must be a configured service alias such as default, notify, or lights."
+                      : connector === "teams"
+                      ? "Microsoft Teams target id must be a webhook alias such as default or ops."
+                      : connector === "mattermost"
+                        ? "Mattermost target id must be a webhook alias such as default or ops."
+                        : connector === "synology-chat"
+                          ? "Synology Chat target id must be a webhook alias such as default or ops."
+                          : connector === "rocket-chat"
+                          ? "Rocket.Chat target id must be a webhook alias such as default or ops."
+                          : connector === "feishu"
+                            ? "Feishu target id must be a webhook alias such as default or ops."
+                            : connector === "dingtalk"
+                              ? "DingTalk target id must be a webhook alias such as default or ops."
+                              : connector === "wecom"
+                                ? "WeCom target id must be a webhook alias such as default or ops."
+                                : connector === "zalo"
+                                  ? "Zalo target id must be a recipient alias such as default or ops."
+                                  : connector === "irc"
+                                    ? "IRC target id must be a channel alias such as default or ops."
+                                    : connector === "twitch"
+                                      ? "Twitch target id must be a channel alias such as default or ops."
+                                      : connector === "ntfy"
+                                        ? "ntfy target id must be a topic alias such as default, ops, or alerts."
+                                        : connector === "mastodon"
+                                        ? "Mastodon target id must be a configured alias such as default, private, or ops."
+                                        : connector === "nextcloud-talk"
+                                        ? "Nextcloud Talk target id must be a room alias such as default or ops."
+                                        : connector === "webex"
+                                          ? "Webex target id must be an opaque roomId value, not a URL or webhook."
+                                          : connector === "zulip"
+                                            ? "Zulip target id must be a configured alias such as default or ops."
+                                            : connector === "email"
+                                              ? "Email target id must be a configured alias such as default or ops."
+                                              : connector === "github"
+                                                ? "GitHub target id must be a configured issue/PR alias such as default or release-pr."
+                                                : connector === "notion"
+                                                  ? "Notion target id must be a configured page alias such as default, ops, or release-notes."
+                                                  : connector === "todoist"
+                                                    ? "Todoist target id must be a configured project alias such as inbox, default, ops, or errands."
+                                                    : "Obsidian target id must be a configured note alias such as default, ops, or daily.");
 }
 
 function normalizeConnectorMessageText(raw: string): string {
@@ -718,6 +995,580 @@ function clipboardCommand(text: string): { command: string; args: string[]; stdi
   if (commandExists("xclip")) return { command: "xclip", args: ["-selection", "clipboard"], stdin: text };
   if (commandExists("xsel")) return { command: "xsel", args: ["--clipboard", "--input"], stdin: text };
   throw new Error("clipboard action failed: install wl-copy, xclip, or xsel for Linux clipboard support.");
+}
+
+function assertBrowserTaskAllowedByConfig(task: BrowserTaskProposal, config: BrowserTaskActionConfig): void {
+  if (task.provider !== config.provider) {
+    throw new Error(`Browser task provider ${task.provider} does not match configured provider ${config.provider}.`);
+  }
+  if (task.task.length > config.maxTaskChars) {
+    throw new Error(`Browser task is too long (${task.task.length} > ${config.maxTaskChars}).`);
+  }
+  if (task.maxAgentSteps > config.maxAgentSteps) {
+    throw new Error(`Browser task maxSteps exceeds configured limit (${task.maxAgentSteps} > ${config.maxAgentSteps}).`);
+  }
+  const allowed = new Set(config.allowedDomains.map(normalizeBrowserTaskDomain));
+  if (allowed.size > 0) {
+    const blocked = task.allowedDomains.filter((domain) => !allowed.has(domain));
+    if (blocked.length > 0) {
+      throw new Error(`Browser task domain is not in actions.browserTask.allowedDomains: ${blocked.join(", ")}`);
+    }
+  }
+}
+
+async function runConfiguredBrowserTask(config: BrowserTaskActionConfig, task: BrowserTaskProposal, fetchImpl: FetchLike = fetch): Promise<BrowserTaskResult> {
+  if (config.provider === "local-cdp") return runLocalCdpBrowserTask(config, task, fetchImpl);
+  if (config.provider === "browserbase-session") return runBrowserbaseSessionTask(config, task, fetchImpl);
+  if (config.provider === "firecrawl-interact") return runFirecrawlInteractTask(config, task, fetchImpl);
+  return runBrowserUseCloudTask(config, task, fetchImpl);
+}
+
+export async function runBrowserUseCloudTask(config: BrowserTaskActionConfig, task: BrowserTaskProposal, fetchImpl: FetchLike = fetch): Promise<BrowserTaskResult> {
+  if (!config.enabled) throw new Error("Browser task actions are disabled in config.");
+  if (config.provider !== "browser-use-cloud") throw new Error("Only Browser Use Cloud browser tasks are supported.");
+  assertBrowserTaskAllowedByConfig(task, config);
+  const apiKey = config.browserUseApiKey?.trim();
+  if (!apiKey) throw new Error(`Browser Use API key is missing. Set ${config.browserUseApiKeyEnv}.`);
+  const baseUrl = normalizeBrowserUseBaseUrl(config.browserUseBaseUrl);
+  const response = await fetchWithTimeout(
+    fetchImpl,
+    `${baseUrl}/api/v2/tasks`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-browser-use-api-key": apiKey
+      },
+      body: JSON.stringify({
+        task: task.task,
+        allowedDomains: task.allowedDomains,
+        maxSteps: task.maxAgentSteps,
+        sessionSettings: {
+          enableRecording: false
+        },
+        highlightElements: false,
+        vision: true,
+        metadata: {
+          source: "viser"
+        }
+      })
+    },
+    config.timeoutMs
+  );
+  const bodyText = await response.text();
+  let body: unknown = undefined;
+  if (bodyText.trim()) {
+    try {
+      body = JSON.parse(bodyText);
+    } catch {
+      body = undefined;
+    }
+  }
+  if (!response.ok) {
+    const detail = typeof body === "object" && body && "detail" in body ? String((body as Record<string, unknown>).detail) : response.statusText;
+    throw new Error(`Browser Use task creation failed (${response.status}): ${detail}`.replace(apiKey, "[REDACTED]"));
+  }
+  if (!body || typeof body !== "object" || typeof (body as Record<string, unknown>).id !== "string") {
+    throw new Error("Browser Use task creation response did not include an id.");
+  }
+  const result = body as Record<string, unknown>;
+  return {
+    id: String(result.id),
+    sessionId: typeof result.sessionId === "string" ? result.sessionId : undefined
+  };
+}
+
+function normalizeBrowserUseBaseUrl(raw: string): string {
+  const url = new URL(raw.trim());
+  if (url.protocol !== "https:") throw new Error("Browser Use base URL must use https.");
+  if (url.username || url.password || url.search || url.hash) throw new Error("Browser Use base URL must not include credentials, query, or hash.");
+  return url.toString().replace(/\/+$/u, "");
+}
+
+interface BrowserbaseSession {
+  id: string;
+  connectUrl: string;
+}
+
+async function createBrowserbaseSession(config: BrowserTaskActionConfig, baseUrl: string, apiKey: string, fetchImpl: FetchLike): Promise<BrowserbaseSession> {
+  const body: Record<string, unknown> = {
+    browserSettings: {
+      timeout: config.browserbaseSessionTimeoutSeconds,
+      keepAlive: false
+    },
+    userMetadata: {
+      source: "viser"
+    }
+  };
+  if (config.browserbaseProjectId?.trim()) body.projectId = config.browserbaseProjectId.trim();
+  const response = await fetchWithTimeout(
+    fetchImpl,
+    `${baseUrl}/v1/sessions`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-bb-api-key": apiKey
+      },
+      body: JSON.stringify(body)
+    },
+    config.timeoutMs
+  );
+  const parsed = await parseJsonResponse(response);
+  if (!response.ok) {
+    throw new Error(`Browserbase session creation failed (${response.status}): ${response.statusText}`.replace(apiKey, "[REDACTED]"));
+  }
+  if (!parsed || typeof parsed !== "object") throw new Error("Browserbase session creation response was not JSON.");
+  const record = parsed as Record<string, unknown>;
+  if (typeof record.id !== "string" || typeof record.connectUrl !== "string") {
+    throw new Error("Browserbase session creation response did not include id and connectUrl.");
+  }
+  const connectUrl = new URL(record.connectUrl);
+  if (connectUrl.protocol !== "wss:") throw new Error("Browserbase connectUrl must use wss.");
+  if (connectUrl.username || connectUrl.password) throw new Error("Browserbase connectUrl must not include URL credentials.");
+  return { id: record.id, connectUrl: connectUrl.toString() };
+}
+
+async function releaseBrowserbaseSession(config: BrowserTaskActionConfig, baseUrl: string, apiKey: string, sessionId: string, fetchImpl: FetchLike): Promise<void> {
+  await fetchWithTimeout(
+    fetchImpl,
+    `${baseUrl}/v1/sessions/${encodeURIComponent(sessionId)}`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-bb-api-key": apiKey
+      },
+      body: JSON.stringify({
+        status: "REQUEST_RELEASE",
+        ...(config.browserbaseProjectId?.trim() ? { projectId: config.browserbaseProjectId.trim() } : {})
+      })
+    },
+    config.timeoutMs
+  );
+}
+
+function normalizeBrowserbaseBaseUrl(raw: string): string {
+  return normalizeHttpsApiBaseUrl(raw, "Browserbase base URL");
+}
+
+function normalizeFirecrawlBaseUrl(raw: string): string {
+  return normalizeHttpsApiBaseUrl(raw, "Firecrawl base URL");
+}
+
+function normalizeHttpsApiBaseUrl(raw: string, label: string): string {
+  const url = new URL(raw.trim());
+  if (url.protocol !== "https:") throw new Error(`${label} must use https.`);
+  if (url.username || url.password || url.search || url.hash) throw new Error(`${label} must not include credentials, query, or hash.`);
+  if (url.pathname && url.pathname !== "/") throw new Error(`${label} must not include a path.`);
+  return url.toString().replace(/\/+$/u, "");
+}
+
+async function createFirecrawlScrape(config: BrowserTaskActionConfig, baseUrl: string, apiKey: string, startUrl: string, fetchImpl: FetchLike): Promise<string> {
+  const response = await fetchWithTimeout(
+    fetchImpl,
+    `${baseUrl}/v2/scrape`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "authorization": `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        url: startUrl,
+        formats: ["markdown"],
+        onlyMainContent: true,
+        removeBase64Images: true,
+        blockAds: true
+      })
+    },
+    config.timeoutMs
+  );
+  const parsed = await parseJsonResponse(response);
+  if (!response.ok) {
+    throw new Error(`Firecrawl scrape for browser task failed (${response.status}): ${response.statusText}`.replace(apiKey, "[REDACTED]"));
+  }
+  const scrapeId = firecrawlScrapeId(parsed);
+  if (!scrapeId) throw new Error("Firecrawl scrape response did not include data.metadata.scrapeId.");
+  return scrapeId;
+}
+
+async function interactWithFirecrawlScrape(config: BrowserTaskActionConfig, baseUrl: string, apiKey: string, scrapeId: string, prompt: string, fetchImpl: FetchLike): Promise<string> {
+  const response = await fetchWithTimeout(
+    fetchImpl,
+    `${baseUrl}/v2/scrape/${encodeURIComponent(scrapeId)}/interact`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "authorization": `Bearer ${apiKey}`
+      },
+      body: JSON.stringify({
+        prompt,
+        timeout: config.firecrawlInteractTimeoutSeconds,
+        origin: "viser"
+      })
+    },
+    Math.max(config.timeoutMs, config.firecrawlInteractTimeoutSeconds * 1000)
+  );
+  const parsed = await parseJsonResponse(response);
+  if (!response.ok) {
+    throw new Error(`Firecrawl interact browser task failed (${response.status}): ${response.statusText}`.replace(apiKey, "[REDACTED]"));
+  }
+  return boundedText(firecrawlInteractText(parsed), config.firecrawlMaxResultChars);
+}
+
+async function stopFirecrawlInteractSession(config: BrowserTaskActionConfig, baseUrl: string, apiKey: string, scrapeId: string, fetchImpl: FetchLike): Promise<void> {
+  await fetchWithTimeout(
+    fetchImpl,
+    `${baseUrl}/v2/scrape/${encodeURIComponent(scrapeId)}/interact`,
+    {
+      method: "DELETE",
+      headers: {
+        "authorization": `Bearer ${apiKey}`
+      }
+    },
+    config.timeoutMs
+  );
+}
+
+function firecrawlScrapeId(parsed: unknown): string | undefined {
+  if (!parsed || typeof parsed !== "object") return undefined;
+  const data = (parsed as Record<string, unknown>).data;
+  if (!data || typeof data !== "object") return undefined;
+  const metadata = (data as Record<string, unknown>).metadata;
+  if (!metadata || typeof metadata !== "object") return undefined;
+  const record = metadata as Record<string, unknown>;
+  return typeof record.scrapeId === "string" ? record.scrapeId : typeof record.scrape_id === "string" ? record.scrape_id : undefined;
+}
+
+function firecrawlInteractText(parsed: unknown): string {
+  if (!parsed || typeof parsed !== "object") return "";
+  const record = parsed as Record<string, unknown>;
+  const parts = [record.output, record.result, record.stdout, record.stderr, record.error]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0);
+  return parts.join("\n").trim();
+}
+
+function boundedText(raw: string, maxChars: number): string {
+  return raw.replace(/\s+/gu, " ").trim().slice(0, Math.max(1, Math.floor(maxChars)));
+}
+
+async function parseJsonResponse(response: Response): Promise<unknown> {
+  const bodyText = await response.text();
+  if (!bodyText.trim()) return undefined;
+  try {
+    return JSON.parse(bodyText);
+  } catch {
+    return undefined;
+  }
+}
+
+interface CdpWebSocketLike {
+  addEventListener(type: "open" | "message" | "error" | "close", listener: (event: { data?: unknown; error?: unknown }) => void, options?: { once?: boolean }): void;
+  send(data: string): void;
+  close(): void;
+}
+
+type CdpWebSocketFactory = (url: string) => CdpWebSocketLike;
+
+interface LocalCdpTarget {
+  id: string;
+  webSocketDebuggerUrl: string;
+}
+
+interface LocalCdpSnapshot {
+  title: string;
+  url: string;
+  text: string;
+}
+
+export async function runLocalCdpBrowserTask(
+  config: BrowserTaskActionConfig,
+  task: BrowserTaskProposal,
+  fetchImpl: FetchLike = fetch,
+  webSocketFactory: CdpWebSocketFactory = (url) => new WebSocket(url)
+): Promise<BrowserTaskResult> {
+  if (!config.enabled) throw new Error("Browser task actions are disabled in config.");
+  if (config.provider !== "local-cdp") throw new Error("Only local CDP browser tasks are supported by this provider branch.");
+  assertBrowserTaskAllowedByConfig(task, config);
+  const baseUrl = normalizeLocalCdpBaseUrl(config.localCdpBaseUrl);
+  const startUrl = browserTaskStartUrl(task);
+  const target = await createLocalCdpTarget(baseUrl, startUrl, fetchImpl, config.timeoutMs);
+  const connection = await CdpConnection.connect(target.webSocketDebuggerUrl, config.timeoutMs, webSocketFactory);
+  try {
+    const snapshot = await captureCdpSnapshot(connection, startUrl, config.localCdpWaitMs, config.localCdpMaxContentChars);
+    return {
+      id: target.id,
+      sessionId: target.id,
+      url: snapshot.url,
+      title: snapshot.title,
+      text: snapshot.text
+    };
+  } finally {
+    if (config.localCdpCloseTab) await connection.send("Page.close").catch(() => undefined);
+    connection.close();
+  }
+}
+
+export async function runBrowserbaseSessionTask(
+  config: BrowserTaskActionConfig,
+  task: BrowserTaskProposal,
+  fetchImpl: FetchLike = fetch,
+  webSocketFactory: CdpWebSocketFactory = (url) => new WebSocket(url)
+): Promise<BrowserTaskResult> {
+  if (!config.enabled) throw new Error("Browser task actions are disabled in config.");
+  if (config.provider !== "browserbase-session") throw new Error("Only Browserbase session browser tasks are supported by this provider branch.");
+  assertBrowserTaskAllowedByConfig(task, config);
+  const apiKey = config.browserbaseApiKey?.trim();
+  if (!apiKey) throw new Error(`Browserbase API key is missing. Set ${config.browserbaseApiKeyEnv}.`);
+  const baseUrl = normalizeBrowserbaseBaseUrl(config.browserbaseBaseUrl);
+  const startUrl = browserTaskStartUrl(task);
+  const session = await createBrowserbaseSession(config, baseUrl, apiKey, fetchImpl);
+  let connection: CdpConnection | undefined;
+  try {
+    connection = await CdpConnection.connect(session.connectUrl, config.timeoutMs, webSocketFactory);
+    const snapshot = await captureCdpSnapshot(connection, startUrl, config.localCdpWaitMs, config.localCdpMaxContentChars);
+    return {
+      id: session.id,
+      sessionId: session.id,
+      url: snapshot.url,
+      title: snapshot.title,
+      text: snapshot.text
+    };
+  } finally {
+    connection?.close();
+    if (config.browserbaseReleaseSession) {
+      await releaseBrowserbaseSession(config, baseUrl, apiKey, session.id, fetchImpl).catch(() => undefined);
+    }
+  }
+}
+
+export async function runFirecrawlInteractTask(config: BrowserTaskActionConfig, task: BrowserTaskProposal, fetchImpl: FetchLike = fetch): Promise<BrowserTaskResult> {
+  if (!config.enabled) throw new Error("Browser task actions are disabled in config.");
+  if (config.provider !== "firecrawl-interact") throw new Error("Only Firecrawl interact browser tasks are supported by this provider branch.");
+  assertBrowserTaskAllowedByConfig(task, config);
+  const apiKey = config.firecrawlApiKey?.trim();
+  if (!apiKey) throw new Error(`Firecrawl browser-task API key is missing. Set ${config.firecrawlApiKeyEnv}.`);
+  const baseUrl = normalizeFirecrawlBaseUrl(config.firecrawlBaseUrl);
+  const startUrl = browserTaskStartUrl(task);
+  const scrapeId = await createFirecrawlScrape(config, baseUrl, apiKey, startUrl, fetchImpl);
+  try {
+    const text = await interactWithFirecrawlScrape(config, baseUrl, apiKey, scrapeId, task.task, fetchImpl);
+    return {
+      id: scrapeId,
+      sessionId: scrapeId,
+      url: startUrl,
+      text
+    };
+  } finally {
+    if (config.firecrawlStopSession) {
+      await stopFirecrawlInteractSession(config, baseUrl, apiKey, scrapeId, fetchImpl).catch(() => undefined);
+    }
+  }
+}
+
+async function captureCdpSnapshot(connection: CdpConnection, startUrl: string, waitMs: number, maxContentChars: number): Promise<LocalCdpSnapshot> {
+  await connection.send("Page.enable");
+  await connection.send("Runtime.enable");
+  await connection.send("Page.navigate", { url: startUrl });
+  await Promise.race([
+    connection.waitForEvent("Page.loadEventFired", waitMs),
+    sleep(Math.max(1, waitMs))
+  ]).catch(() => undefined);
+  const evaluated = await connection.send("Runtime.evaluate", {
+    expression: localCdpSnapshotExpression(maxContentChars),
+    returnByValue: true,
+    awaitPromise: true
+  });
+  return parseLocalCdpSnapshot(evaluated);
+}
+
+class CdpConnection {
+  private nextId = 1;
+  private pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void; timeout: NodeJS.Timeout }>();
+  private eventWaiters = new Map<string, Array<{ resolve: (value: unknown) => void; timeout: NodeJS.Timeout }>>();
+  private socket: CdpWebSocketLike;
+  private timeoutMs: number;
+
+  private constructor(socket: CdpWebSocketLike, timeoutMs: number) {
+    this.socket = socket;
+    this.timeoutMs = timeoutMs;
+    socket.addEventListener("message", (event) => this.handleMessage(event.data));
+    socket.addEventListener("close", () => this.rejectAll(new Error("local CDP websocket closed before command completed")));
+    socket.addEventListener("error", (event) => this.rejectAll(new Error(`local CDP websocket error: ${String(event.error ?? "unknown")}`)));
+  }
+
+  static async connect(url: string, timeoutMs: number, factory: CdpWebSocketFactory): Promise<CdpConnection> {
+    const socket = factory(url);
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`local CDP websocket open timed out after ${timeoutMs}ms`)), Math.max(1, timeoutMs));
+      timer.unref?.();
+      socket.addEventListener("open", () => {
+        clearTimeout(timer);
+        resolve();
+      }, { once: true });
+      socket.addEventListener("error", (event) => {
+        clearTimeout(timer);
+        reject(new Error(`local CDP websocket error: ${String(event.error ?? "unknown")}`));
+      }, { once: true });
+    });
+    return new CdpConnection(socket, timeoutMs);
+  }
+
+  async send(method: string, params?: Record<string, unknown>): Promise<unknown> {
+    const id = this.nextId++;
+    const payload = params ? { id, method, params } : { id, method };
+    const promise = new Promise<unknown>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`local CDP command timed out: ${method}`));
+      }, Math.max(1, this.timeoutMs));
+      timeout.unref?.();
+      this.pending.set(id, { resolve, reject, timeout });
+    });
+    this.socket.send(JSON.stringify(payload));
+    return promise;
+  }
+
+  waitForEvent(method: string, timeoutMs: number): Promise<unknown> {
+    return new Promise((resolve) => {
+      const timeout = setTimeout(() => {
+        const waiters = this.eventWaiters.get(method) ?? [];
+        this.eventWaiters.set(method, waiters.filter((waiter) => waiter.resolve !== resolve));
+        resolve(undefined);
+      }, Math.max(1, timeoutMs));
+      timeout.unref?.();
+      const waiters = this.eventWaiters.get(method) ?? [];
+      waiters.push({ resolve, timeout });
+      this.eventWaiters.set(method, waiters);
+    });
+  }
+
+  close(): void {
+    this.socket.close();
+    this.rejectAll(new Error("local CDP websocket closed"));
+  }
+
+  private handleMessage(data: unknown): void {
+    if (typeof data !== "string") return;
+    let message: unknown;
+    try {
+      message = JSON.parse(data);
+    } catch {
+      return;
+    }
+    if (!message || typeof message !== "object") return;
+    const record = message as Record<string, unknown>;
+    if (typeof record.id === "number") {
+      const pending = this.pending.get(record.id);
+      if (!pending) return;
+      this.pending.delete(record.id);
+      clearTimeout(pending.timeout);
+      if (record.error) pending.reject(new Error(`local CDP command failed: ${JSON.stringify(record.error)}`));
+      else pending.resolve(record.result);
+      return;
+    }
+    if (typeof record.method === "string") {
+      const waiters = this.eventWaiters.get(record.method) ?? [];
+      this.eventWaiters.delete(record.method);
+      for (const waiter of waiters) {
+        clearTimeout(waiter.timeout);
+        waiter.resolve(record.params);
+      }
+    }
+  }
+
+  private rejectAll(error: Error): void {
+    for (const [id, pending] of this.pending) {
+      clearTimeout(pending.timeout);
+      pending.reject(error);
+      this.pending.delete(id);
+    }
+  }
+}
+
+async function createLocalCdpTarget(baseUrl: string, startUrl: string, fetchImpl: FetchLike, timeoutMs: number): Promise<LocalCdpTarget> {
+  const targetUrl = `${baseUrl}/json/new?${encodeURIComponent(startUrl)}`;
+  let response = await fetchWithTimeout(fetchImpl, targetUrl, { method: "PUT" }, timeoutMs);
+  if (response.status === 404 || response.status === 405) {
+    response = await fetchWithTimeout(fetchImpl, targetUrl, { method: "GET" }, timeoutMs);
+  }
+  const bodyText = await response.text();
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch {
+    parsed = undefined;
+  }
+  if (!response.ok) {
+    throw new Error(`local CDP target creation failed (${response.status}): ${response.statusText}`);
+  }
+  if (!parsed || typeof parsed !== "object") throw new Error("local CDP target creation response was not JSON.");
+  const record = parsed as Record<string, unknown>;
+  if (typeof record.id !== "string" || typeof record.webSocketDebuggerUrl !== "string") {
+    throw new Error("local CDP target creation response did not include id and webSocketDebuggerUrl.");
+  }
+  return {
+    id: record.id,
+    webSocketDebuggerUrl: record.webSocketDebuggerUrl
+  };
+}
+
+function browserTaskStartUrl(task: BrowserTaskProposal): string {
+  const explicitUrls = task.task.match(/https?:\/\/[^\s"'<>]+/giu) ?? [];
+  for (const candidate of explicitUrls) {
+    try {
+      const url = new URL(candidate);
+      const host = normalizeBrowserTaskDomain(url.hostname);
+      if (url.protocol === "https:" && task.allowedDomains.includes(host)) return url.toString();
+    } catch {
+      // Keep scanning for a safe explicit URL.
+    }
+  }
+  return `https://${task.allowedDomains[0]}/`;
+}
+
+function localCdpSnapshotExpression(maxChars: number): string {
+  const limit = Math.max(1, Math.min(50_000, Math.floor(maxChars)));
+  return `(() => {
+    const clean = (value, max = ${limit}) => String(value ?? "").replace(/\\s+/g, " ").trim().slice(0, max);
+    const body = document.body ? document.body.innerText : document.documentElement ? document.documentElement.textContent : "";
+    return {
+      title: clean(document.title, 500),
+      url: String(location.href),
+      text: clean(body, ${limit})
+    };
+  })()`;
+}
+
+function parseLocalCdpSnapshot(evaluated: unknown): LocalCdpSnapshot {
+  if (!evaluated || typeof evaluated !== "object") throw new Error("local CDP evaluate result was not an object.");
+  const outer = evaluated as Record<string, unknown>;
+  const remoteObject = outer.result;
+  if (!remoteObject || typeof remoteObject !== "object") throw new Error("local CDP evaluate result did not include a remote object.");
+  const value = (remoteObject as Record<string, unknown>).value;
+  if (!value || typeof value !== "object") throw new Error("local CDP evaluate result did not include a by-value snapshot.");
+  const snapshot = value as Record<string, unknown>;
+  return {
+    title: typeof snapshot.title === "string" ? snapshot.title : "",
+    url: typeof snapshot.url === "string" ? snapshot.url : "",
+    text: typeof snapshot.text === "string" ? snapshot.text : ""
+  };
+}
+
+function normalizeLocalCdpBaseUrl(raw: string): string {
+  const url = new URL(raw.trim());
+  const hostname = url.hostname.trim().toLowerCase().replace(/^\[/u, "").replace(/\]$/u, "").replace(/\.$/u, "");
+  if (url.protocol !== "http:") throw new Error("local CDP base URL must use http.");
+  if (hostname !== "localhost" && hostname !== "127.0.0.1" && hostname !== "::1") throw new Error("local CDP base URL must point to localhost, 127.0.0.1, or ::1.");
+  if (url.username || url.password || url.search || url.hash) throw new Error("local CDP base URL must not include credentials, query, or hash.");
+  if (url.pathname && url.pathname !== "/") throw new Error("local CDP base URL must not include a path.");
+  return url.toString().replace(/\/+$/u, "");
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, Math.max(1, ms)));
 }
 
 async function missingConnectorMessageSender(): Promise<void> {

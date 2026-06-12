@@ -2456,3 +2456,957 @@
 - npm/GitHub 공개 패키지에 로고가 빠져 README 이미지가 깨지지 않도록 `package.json` files allowlist에 `assets`를 추가했다.
 - `release-evidence`와 package script regression test가 package allowlist의 `assets` 포함을 검증하도록 갱신했다.
 - 검증: `node --test test/package-scripts.test.ts test/release-evidence.test.ts`(11 pass), `npm run typecheck -- --pretty false`, `node src/index.ts release-evidence`(READY, files=12), `npm pack --dry-run --json`에서 `assets/viser-icon.png`와 `assets/viser-readme-logo.png` 포함 및 `.env/.viser/.omx/.npmrc/viser.config.json` 제외를 확인했다.
+
+## 2026-05-29 1단계: OpenClaw/Hermes parity audit 보강과 승인형 skill capture
+
+- 기존 사용자 제약인 “백그라운드 서비스 금지, 사용자가 `viser`를 foreground terminal에서 켠 동안만 작동”을 유지하면서 경쟁 기능 갭을 재점검했다.
+- Hermes의 self-improving skill loop 격차를 줄이기 위해 `/learn-skill <id> | <description> | <procedure>`를 추가했다.
+  - 직접 파일을 쓰지 않고 기존 approval-gated action store에 `write-file .../SKILL.md`로 staging한다.
+  - `/approve <id>` 후에만 개인 `SKILL.md`로 저장되고 `/skills`/`/skill`에서 재사용된다.
+- `/propose write-file` parser가 multiline content를 보존하도록 바꿔 `SKILL.md` 같은 구조화 문서를 안전하게 staging할 수 있게 했다.
+- local smoke에 dashboard JSON, learned skill capture, bounded parallel jobs 증거를 추가했다.
+- `release-evidence` objective matrix를 OpenClaw/Hermes 대비 실제 경쟁 항목으로 확장했다.
+  - foreground-only constraint, channel breadth, skill learning, orchestration, MCP/plugin/tools/actions, dashboard UX, performance-envelope를 분리했다.
+  - live provider/connector proof가 모두 있어도 Slack/WhatsApp/Signal 등 channel breadth, collaborative Canvas/streaming voice, 외부 benchmark 증거가 없으면 completion은 `UNPROVEN`으로 남게 했다.
+- Targeted 검증: `npm run typecheck`, `node --test test/actions.test.ts test/assistant.test.ts test/smoke.test.ts test/release-evidence.test.ts` 통과.
+
+## 2026-05-29 2단계: Slack first-class connector로 channel breadth 보강
+
+- OpenClaw/Hermes 대비 남은 channel breadth gap 중 foreground-only 제약을 깨지 않고 구현 가능한 Slack surface를 first-class connector로 추가했다.
+- `src/connectors/slack.ts`를 추가해 Slack Socket Mode foreground inbound, Web API `chat.postMessage` outbound, prefix/mention/DM normalization, access pairing, per-channel rate-limit, input-size guard, token redaction, reconnect loop를 구현했다.
+- config/types/readiness/env/audit/dashboard/MCP/action/scheduler/gateway 경로를 Slack까지 확장했다.
+  - `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN`, `SLACK_BOT_USER_ID` env를 지원한다.
+  - `/propose message slack:<channel-id> | <text>`는 Telegram/Discord와 같은 approval-gated connector action 경계를 사용한다.
+  - Slack 대화에서 만든 schedule은 token이 있으면 Slack channel로 delivery할 수 있다.
+- local smoke가 Slack inbound handler와 approval-gated Slack outbound를 외부 provider 없이 mock Web API로 검증하도록 확장했다.
+- `release-evidence` objective matrix는 Telegram/Discord/Slack을 messenger evidence로 요구하고, 남은 channel breadth gap을 WhatsApp/Signal 등 아직 미구현 surface로 좁혀 기록한다.
+- README와 `.env.example`, config example, package script에 Slack 사용법과 foreground-only 운영 경계를 반영했다.
+- 검증: `npm run typecheck`, `node --test test/connectors.test.ts test/actions.test.ts test/smoke.test.ts test/release-evidence.test.ts test/readiness.test.ts test/next-steps.test.ts test/env.test.ts test/validate.test.ts test/connector-access.test.ts test/gateway-cli.test.ts test/package-scripts.test.ts`(152 pass) 통과.
+
+## 2026-05-29 3단계: provider-assisted skill reflection으로 self-improvement gap 축소
+
+- Hermes식 self-improving loop 대비 남아 있던 “작업 후 경험을 provider가 재사용 절차로 증류하는” 경로를 foreground-only/approval-gated 경계 안에서 구현했다.
+- `/reflect-skill <id> | <description> [| focus]`를 추가해 최근 세션 transcript를 prompt safety contract와 untrusted block으로 감싼 뒤 provider에게 `SKILL.md` procedure body만 작성하게 했다.
+- Provider가 만든 draft는 즉시 파일로 쓰지 않고 기존 `write-file .../SKILL.md` approval action으로 staging되며, `/approve <id>` 이후에만 `.viser/skills/<id>/SKILL.md`로 저장되어 `/skills`/`/skill`에서 재사용된다.
+- local smoke에 `skill-reflection` item을 추가했고, `release-evidence`의 `skill-learning` objective가 manual skill capture뿐 아니라 provider-assisted session reflection smoke proof도 요구하도록 강화했다.
+- README의 slash command 목록, smoke 설명, OpenClaw/Hermes gap 문서에 `/reflect-skill`과 남은 real-provider closed-loop evidence gap을 반영했다.
+
+## 2026-05-29 4단계: Matrix first-class connector 검증 정렬
+
+- OpenClaw/Hermes 대비 channel breadth gap을 더 줄이기 위해 추가된 Matrix connector가 access, smoke, release-evidence, next-steps 증거 표면에서 Slack과 같은 first-class connector로 취급되도록 회귀 테스트를 정렬했다.
+- `parseConnector()`는 이제 `matrix`를 정상 connector로 인정하므로 access regression test를 갱신하고 unknown connector 거부도 함께 고정했다.
+- `release-evidence`와 `next-steps` 테스트는 Telegram/Discord/Slack/Matrix 네 표면 모두의 disabled-live-token, accepted-live-token redaction, approval-gated outbound, Matrix inbound smoke 증거를 요구한다.
+- 검증: `npm test`(449 pass), `npm run typecheck`, `node src/index.ts smoke`(21 pass), `node src/index.ts verify --strict`(PASS), `node src/index.ts release-evidence`(READY, completion은 경쟁 parity proof 부족으로 UNPROVEN)를 통과했다.
+
+## 2026-05-29 5단계: same-host benchmark harness로 성능 증거 경로 추가
+
+- OpenClaw/Hermes 대비 남은 performance gap이 “추측”으로만 남지 않도록 dependency-free `node src/index.ts benchmark` 명령을 추가했다.
+- 기본 모드는 외부 provider CLI를 부르지 않는 local deterministic provider로 Viser provider-path overhead를 측정한다.
+- `--live --provider <provider>`는 로그인된 local CLI provider path를 임시 state에서 측정하고, `--hermes "hermes ... {prompt}"`, `--openclaw "openclaw ... {prompt}"`, `--baseline "label::cmd ... {prompt}"`로 같은 host/같은 prompt의 경쟁 baseline을 no-shell subprocess로 실행할 수 있게 했다.
+- Benchmark output은 median/p95/mean/min/max, sentinel success count, baseline 대비 competitive status를 text/JSON으로 제공한다.
+- `localSmoke`에 `benchmark` check를 추가하고, `release-evidence`의 `performance-envelope` objective가 bounded parallel jobs뿐 아니라 benchmark harness source와 smoke proof를 요구하도록 강화했다.
+- README와 recommended commands에 benchmark 사용법과 남은 same-host competitor artifact 요구를 문서화했다.
+- 검증: `node --test test/benchmark.test.ts test/smoke.test.ts test/release-evidence.test.ts test/package-scripts.test.ts`(17 pass), `npm run typecheck`, `node src/index.ts benchmark`(PASS), `node src/index.ts smoke`(22 pass), `node src/index.ts verify --strict`(PASS), `node src/index.ts release-evidence`(READY, completion은 live/competitor proof 부족으로 UNPROVEN), `npm test`(452 pass)를 통과했다.
+
+## 2026-05-29 6단계: Signal first-class connector와 live-proof 경계 보강
+
+- OpenClaw/Hermes 대비 남은 channel breadth gap 중 foreground-only 제약을 유지하며 구현 가능한 Signal surface를 first-class connector로 추가했다.
+- Signal은 공식 bot token API가 아니라 로컬 `signal-cli` 계정 상태를 사용하는 구조라, 새 dependency나 background daemon을 추가하지 않고 foreground loop에서만 `signal-cli`를 no-shell subprocess로 실행한다.
+- `src/connectors/signal.ts`를 추가해 `signal-cli -a <account> --output json receive` 기반 inbound polling, `send -m` outbound, E.164/UUID recipient normalization, access pairing, static allow/default recipient list, per-recipient rate-limit, input-size guard, account/recipient/body redaction을 구현했다.
+- config/types/readiness/env/audit/backup/dashboard/MCP/action/scheduler/gateway/release-evidence 경로를 Signal까지 확장했다.
+  - `SIGNAL_CLI_ACCOUNT`, `SIGNAL_CLI_COMMAND` env를 지원한다.
+  - `/propose message signal:<recipient-id> | <text>`는 기존 approval-gated connector action 경계를 재사용한다.
+  - Signal 대화에서 만든 schedule은 account가 있으면 local `signal-cli` send로 delivery할 수 있다.
+- README와 `.env.example`, config example, package script에 Signal 사용법과 redaction/foreground-only 운영 경계를 반영했고, public audit이 실제 phone-number 예시를 secret으로 오탐하지 않도록 공개 예시는 placeholder로 유지했다.
+- `release-evidence` objective matrix는 Telegram/Discord/Slack/Matrix/Signal을 messenger evidence로 요구하고, 남은 channel breadth gap을 WhatsApp/iMessage/Google Chat/Microsoft Teams 및 실제 계정 기반 live proof로 좁혀 기록한다.
+- 검증 중 full test에서 shell PATH command test가 load 때문에 1초 timeout에 걸릴 수 있어 test fixture timeout을 3초로 올려 병렬 전체 테스트를 안정화했다. Production timeout은 바꾸지 않았다.
+- 검증: signal-cli upstream man/README에서 account 국제번호, `send -m`, `--output json` receive 동작을 확인했다. `npm run typecheck -- --pretty false`, targeted Signal/release/audit tests(55 pass), `npm test`(456 pass), `node src/index.ts smoke`(23 pass), `node src/index.ts benchmark`(PASS, local deterministic), `node src/index.ts verify --strict`(PASS: readiness 24 pass, audit 36 pass, smoke 23 pass), `node src/index.ts release-evidence`(READY, public blockers none; goal completion은 live/competitor proof 부족으로 UNPROVEN), `node src/index.ts audit`(SAFE), `npm pack --dry-run --json`(76 files, private runtime artifacts excluded)을 통과했다.
+
+
+## 2026-05-29 7단계: iMessage local connector로 macOS Messages surface 보강
+
+- OpenClaw/Hermes 대비 남은 channel breadth gap 중 foreground-only 제약 안에서 가능한 iMessage/macOS Messages surface를 first-class connector로 추가했다.
+- iMessage는 public bot token API가 없으므로 새 dependency나 background daemon 없이 로컬 `sqlite3 -readonly -json ~/Library/Messages/chat.db` polling과 Messages 앱 `osascript` send를 no-shell subprocess로 실행한다.
+- 초기 실행 시 과거 개인 메시지 기록을 provider로 replay하지 않도록 cursor를 먼저 seed하고, 신규 inbound만 access pairing/rate-limit/input-size guard 뒤 AssistantRuntime으로 전달한다.
+- config/types/readiness/env/audit/backup/dashboard/MCP/action/scheduler/gateway/release-evidence 경로를 iMessage까지 확장했다.
+  - `IMESSAGE_SQLITE_COMMAND`, `IMESSAGE_OSASCRIPT_COMMAND`, `IMESSAGE_CHAT_DB` env를 지원한다.
+  - `/propose message imessage:<handle-id> | <text>`는 기존 approval-gated connector action 경계를 재사용한다.
+  - iMessage 대화에서 만든 schedule은 foreground process와 macOS Messages 권한이 있을 때 `osascript` send로 delivery할 수 있다.
+- local smoke가 iMessage inbound handler와 approval-gated outbound를 fake osascript runner로 검증하도록 확장했고, release evidence objective matrix가 Telegram/Discord/Slack/Matrix/Signal/iMessage를 messenger evidence로 요구하게 했다.
+- 남은 channel breadth gap은 WhatsApp/Google Chat/Microsoft Teams 등 아직 미구현 surface와 실제 계정 기반 live connector proof로 좁혔다.
+
+## 2026-05-29 8단계: WhatsApp Cloud API connector로 channel breadth 보강
+
+- OpenClaw/Hermes 대비 남은 channel breadth gap 중 WhatsApp surface를 foreground-only 제약 안에서 first-class connector로 추가했다.
+- WhatsApp은 Meta Cloud API webhook/Graph API send 모델을 사용하므로 새 dependency 없이 로컬 foreground HTTP webhook server와 `fetch` 기반 `/{phone-number-id}/messages` outbound를 구현했다.
+- config/types/readiness/env/audit/backup/dashboard/MCP/action/scheduler/gateway/release-evidence 경로를 WhatsApp까지 확장했다.
+  - `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID`, `WHATSAPP_VERIFY_TOKEN`, `WHATSAPP_GRAPH_API_VERSION` env를 지원한다.
+  - `/propose message whatsapp:<recipient-id> | <text>`는 기존 approval-gated connector action 경계를 재사용한다.
+  - WhatsApp 대화에서 만든 schedule은 foreground process와 Cloud API credential이 있을 때 Graph API send로 delivery할 수 있다.
+- webhook `GET` challenge 검증, `POST` event payload text extraction, E.164 recipient normalization, access pairing, static allow/default recipient list, per-recipient rate-limit, input-size guard, token/phoneNumberId/verifyToken/recipient/body redaction을 구현했다.
+- local smoke가 WhatsApp webhook handler와 approval-gated outbound를 mocked Graph API로 검증하도록 확장했고, release evidence objective matrix가 Telegram/Discord/Slack/Matrix/Signal/iMessage/WhatsApp을 messenger evidence로 요구하게 했다.
+- 남은 channel breadth gap은 Google Chat/Microsoft Teams 등 추가 surface와 실제 계정 기반 live connector proof로 좁혔다.
+
+## 2026-05-29 9단계: Google Chat / Microsoft Teams webhook sender로 channel breadth 보강
+
+- OpenClaw/Hermes 대비 남은 channel breadth gap 중 Google Chat과 Microsoft Teams surface를 first-class outbound webhook connector로 추가했다.
+- 두 surface의 incoming webhook은 사용자 inbound 대화 bridge가 아니라 channel/workflow scoped outbound endpoint이므로, 기존 access allowlist/pairing, approval-gated `/propose message`, scheduler delivery 경계를 재사용하는 outbound sender로 범위를 명확히 했다.
+- config/types/readiness/env/audit/backup/dashboard/MCP/action/scheduler/release-evidence 경로를 Google Chat/Teams까지 확장했다.
+  - `GOOGLE_CHAT_WEBHOOK_URL`, `GOOGLE_CHAT_WEBHOOKS`, `TEAMS_WEBHOOK_URL`, `TEAMS_WEBHOOKS` env를 지원한다.
+  - `/propose message google-chat:<alias> | <text>`와 `/propose message teams:<alias> | <text>`는 webhook URL 대신 alias만 action state에 남긴다.
+  - scheduler delivery는 `google-chat:<alias>`, `teams:<alias>` session을 webhook send로 되돌릴 수 있다.
+- webhook URL은 transport secret으로 취급해 config/audit/backup/error detail에서 redaction하고, Google Chat URL은 `https://chat.googleapis.com/...key=...&token=...` shape를 검증한다. Teams URL은 HTTPS만 허용한다.
+- local smoke가 Google Chat text payload와 Teams Adaptive Card payload, approval-gated outbound 경로를 mocked fetch로 검증하도록 확장했고, release evidence objective matrix가 Telegram/Discord/Slack/Matrix/Signal/iMessage/WhatsApp/Google Chat/Teams channel evidence를 요구하게 했다.
+- 남은 channel breadth gap은 platform-specific chat surface와 실제 계정 기반 live proof로 좁혔다.
+
+## 2026-05-29 10단계: Mattermost / Feishu webhook sender로 channel breadth 추가 보강
+
+- OpenClaw/Hermes 대비 남은 platform-specific chat surface 격차를 더 줄이기 위해 Mattermost incoming webhook sender와 Feishu/Lark custom bot webhook sender를 추가했다.
+- 두 connector 모두 Google Chat/Teams와 같은 approval-gated outbound message, scheduler delivery, access allow/pairing alias, readiness/live URL shape proof, audit secret guard, backup redaction, smoke/release-evidence 경로로 통합했다.
+- 실계정 credential proof와 Hermes/OpenClaw same-host baseline은 여전히 외부 환경 증거가 필요하므로 completion audit은 계속 UNPROVEN으로 남긴다.
+
+## 2026-05-29 11단계: Webex Messages API sender로 chat surface 추가 보강
+
+- OpenClaw/Hermes 대비 남은 channel-breadth 격차를 줄이기 위해 Webex `POST /v1/messages` 기반 outbound sender를 추가했다.
+- Webex token은 `WEBEX_ACCESS_TOKEN` env로만 주입하고, 승인/allowlist 경계는 `webex:<roomId>` target으로 유지했다.
+- readiness/live proof는 Webex `GET /v1/people/me` credential check를 사용하며, token/roomId/message body는 error, backup, release evidence에서 redacted되도록 테스트를 추가했다.
+- 검증: `npm run typecheck -- --pretty false`, `npm test` 통과. 이어서 smoke/verify/release-evidence로 최종 gate를 확인한다.
+
+## 2026-05-29 12단계: Zulip Messages API sender로 channel breadth 추가 보강
+
+- OpenClaw/Hermes 대비 남은 channel-breadth 격차를 더 줄이기 위해 Zulip `POST /api/v1/messages` 기반 outbound sender를 추가했다.
+- Zulip credential은 `ZULIP_SITE_URL`, `ZULIP_BOT_EMAIL`, `ZULIP_API_KEY` env로만 주입하고, 승인/allowlist 경계는 `zulip:<alias>` target으로 유지했다.
+- `stream:<channel>:<topic>` 및 `direct:<email-or-user-id>[|...]` target spec을 지원하되 action state와 error/report에는 alias와 redacted target만 남기도록 했다.
+- readiness/live proof는 Zulip `GET /api/v1/users/me` credential check를 사용하며, site URL/bot email/API key/target/message body는 error, backup, public audit, release evidence에서 redacted되도록 테스트를 추가했다.
+- 검증: `npm run typecheck -- --pretty false`, `npm test`(483 pass), `node src/index.ts smoke`(31 pass), `node src/index.ts verify --strict`(PASS: readiness 32 pass, audit 44 pass, smoke 31 pass), `node src/index.ts audit`(SAFE), `node src/index.ts release-evidence`(READY, completion은 live/competitor proof 부족으로 UNPROVEN), `npm pack --dry-run --json`, `git diff --check`를 통과했다.
+
+## 2026-05-29 13단계: Rocket.Chat incoming webhook sender로 channel breadth 추가 보강
+
+- OpenClaw/Hermes 대비 남은 channel-breadth 격차를 더 줄이기 위해 Rocket.Chat incoming integration webhook sender를 추가했다.
+- Rocket.Chat credential은 `ROCKET_CHAT_WEBHOOK_URL`/`ROCKET_CHAT_WEBHOOKS` env로만 주입하고, 승인/allowlist 경계는 `rocket-chat:<alias>` target으로 유지했다.
+- webhook URL은 `https://<server>/hooks/<integrationId>/<token>` 형태만 허용하고 URL credential, alias, message body는 error/backup/audit/release evidence에서 redacted되도록 했다.
+- config/types/readiness/env/audit/backup/dashboard/MCP/action/scheduler/gateway/release-evidence/smoke/test 경로를 Rocket.Chat까지 확장했다.
+- 검증: `npm run typecheck -- --pretty false`, `npm test`(484 pass), `node src/index.ts smoke`(32 pass), `node src/index.ts verify --strict`(PASS: readiness 33 pass, audit 45 pass, smoke 32 pass), `node src/index.ts audit`(SAFE), `node src/index.ts release-evidence`(READY, completion은 live/competitor proof 부족으로 UNPROVEN), `npm pack --dry-run --json`(85 files), `git diff --check`를 통과했다.
+
+## 2026-05-29 14단계: Dashboard operator activity stream으로 UX 격차 보강
+
+- OpenClaw/Hermes 대비 남은 dashboard-ux 격차 중 외부 계정 없이 줄일 수 있는 로컬 운영 표면을 보강했다.
+- `DashboardData`에 최근 job preview, pending approval preview, operator activity stream을 추가해 승인·job·스케줄·세션 흐름과 대응 명령 힌트를 provider 호출 없이 같은 snapshot에서 볼 수 있게 했다.
+- Web dashboard `/` 화면은 `/dashboard.events` SSE snapshot으로 operator activity list와 canvas activity node를 갱신하고, `/dashboard.canvas.svg`도 activity summary를 포함한다.
+- `dashboard-check`는 live `/dashboard.json`의 operator activity 계약까지 검증해 오래된 foreground dashboard 프로세스나 stale UI를 더 빨리 잡는다.
+- 이 보강은 여전히 read-only surface로 남겨 provider 호출, write action 실행, job execution route를 추가하지 않았다. Collaborative multi-user Canvas editing과 streaming/continuous voice conversation은 completion audit의 남은 UX proof로 유지한다.
+
+## 2026-05-29 15단계: Skill reflection durable proof로 self-improvement 증거 보강
+
+- Hermes/OpenClaw 대비 skill-learning gap을 더 줄이기 위해 `/reflect-skill`이 provider-assisted SKILL.md draft만 만들고 끝나지 않도록 durable proof를 남기게 했다.
+- Reflection proof는 skill id, provider id, approval action id, target, transcript message count/hash, procedure byte count만 저장하고 transcript 원문이나 생성된 절차 본문은 proof log에 중복 저장하지 않는다.
+- `/skill-reflections` 명령을 추가해 reflection proof와 연결된 approval 상태(pending/approved/rejected/missing-action)를 provider 호출 없이 확인할 수 있게 했다.
+- 기존 approval-gated write boundary는 그대로 유지해 provider가 만든 절차가 자동 저장/실행되지 않으며, `/approve <id>` 후에만 `SKILL.md`로 재사용된다.
+
+## 2026-05-29 16단계: Benchmark artifact 저장으로 performance-envelope 증거 보강
+
+- Hermes/OpenClaw 대비 성능 parity 주장을 단순 터미널 출력에 의존하지 않도록 `benchmark --save` artifact 저장 경로를 추가했다.
+- `runBenchmark`는 요청 시 private `.viser/benchmarks/*.json` artifact를 저장하고, 명시 `--artifact`/`--artifactPath`로 저장 위치를 지정할 수 있다.
+- `release-evidence`는 최신 저장 benchmark artifact의 mode, competitive status, baseline label만 safe-to-paste 증거로 요약하고, local path나 baseline command는 공개 보고서에 노출하지 않는다.
+- local smoke는 dependency-free deterministic benchmark가 private artifact까지 저장하는지 확인한다. 실제 Hermes/OpenClaw same-host live artifact는 여전히 외부 CLI가 준비된 환경에서 `benchmark --live --save --hermes ... --openclaw ...`로 생성해야 한다.
+
+## 2026-05-29 17단계: Local collaborative canvas로 dashboard UX 격차 축소
+
+- OpenClaw/Hermes 대비 dashboard-ux gap 중 외부 계정 없이 보강 가능한 collaborative canvas를 foreground localhost dashboard에 추가했다.
+- `/canvas.html`은 같은 Node 프로세스 안의 in-memory stroke list를 탭 간 공유하고, `/canvas.events` SSE로 즉시 동기화한다.
+- `/canvas.json` POST는 페이지에 주입된 same-origin `x-viser-canvas-token` 없이는 거부되고, stroke payload는 좌표·색상·폭·작성자 길이와 최대 stroke/point 개수를 정규화해 provider/action/job route와 분리했다.
+- `dashboard-check`, local smoke, release evidence objective matrix, README를 갱신해 ephemeral localhost collaborative canvas는 증거로 남기고, streaming/continuous voice와 원격 인증/영속 multi-user canvas는 남은 proof로 유지한다.
+
+## 2026-05-29 18단계: LINE Messaging API connector로 channel breadth 추가 보강
+
+- OpenClaw/Hermes 대비 남은 channel-breadth 격차를 더 줄이기 위해 LINE Messaging API foreground webhook/reply/push bridge를 추가했다.
+- LINE credential은 `LINE_CHANNEL_ACCESS_TOKEN`, `LINE_CHANNEL_SECRET` env로만 주입하고, 승인/allowlist 경계는 `line:<peer-id>` target으로 유지했다.
+- Inbound webhook은 `x-line-signature` HMAC-SHA256 검증을 통과한 text event만 처리하고, reply token이 있으면 reply endpoint, 없으면 push endpoint로 응답한다.
+- channel access token, channel secret, peer/reply token, message body는 error/audit/release-evidence 경로에서 redacted되도록 했다.
+- config/types/readiness/env/audit/dashboard/MCP/action/scheduler/gateway/release-evidence/smoke/test 경로를 LINE까지 확장했다.
+- 실계정 credential proof와 Hermes/OpenClaw same-host benchmark artifact는 여전히 외부 환경 증거가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+
+## 2026-05-29 19단계: Persistent localhost collaborative canvas로 dashboard UX 추가 보강
+
+- Stage 17의 collaborative canvas가 프로세스 메모리에만 머물러 재시작 후 작업 맥락이 사라지는 UX gap을 줄였다.
+- `webDashboard.canvasDir`를 추가하고 기본 `.viser/dashboard/canvas.json` private local JSON store에 정규화된 stroke만 저장/복구하게 했다.
+- `/canvas.json` POST는 기존 same-origin `x-viser-canvas-token` 경계를 유지하고, token은 파일에 저장하지 않으며, provider/action/job route는 계속 노출하지 않는다.
+- `dashboard-check`는 `/canvas.html`이 persistent localhost board contract를 제공하는지 확인해 오래된 ephemeral dashboard 프로세스를 잡는다.
+- local smoke와 web-dashboard regression test는 stroke 저장, 재시작 reload, provider 미호출, persistence metadata를 검증한다.
+- readiness/audit는 enabled dashboard의 `webDashboard.canvasDir`가 private writable state로 준비되고 assistant workdir 아래에 머무는지 확인한다.
+- 검증: `npm run typecheck -- --pretty false`, `npm test`(496 pass), `node src/index.ts smoke`(34 pass), `node src/index.ts verify --strict`(PASS: readiness 35 pass, audit 47 pass, smoke 34 pass), `node src/index.ts audit`(SAFE), `node src/index.ts release-evidence`(READY, completion은 live/competitor proof 부족으로 UNPROVEN), `npm pack --dry-run --json`(86 files), `git diff --check`를 통과했다.
+- non-local hosted authenticated multi-user canvas와 streaming/continuous voice conversation은 여전히 별도 외부 UX proof로 남는다.
+
+## 2026-05-29 20단계: Token-authenticated remote-capable dashboard canvas
+
+- Stage 19의 persistent canvas가 localhost에만 묶여 있던 UX gap을 더 줄이기 위해, 명시 opt-in 원격 dashboard 인증 경계를 추가했다.
+- `webDashboard.allowRemote=false`를 기본값으로 유지하고, non-local bind는 `allowRemote=true`와 강한 `VISER_DASHBOARD_TOKEN`이 있을 때만 readiness/audit/CLI gate를 통과하게 했다.
+- Dashboard token이 설정되면 `/login` 또는 `Authorization: Bearer <token>` 없이는 `/`, `/dashboard.json`, `/dashboard.events`, `/canvas.html`, `/canvas.json` 등 dashboard/canvas route를 열지 않는다.
+- Browser login은 HttpOnly SameSite cookie를 발급해 EventSource/fetch가 동작하게 하고, canvas mutation에는 별도의 per-process `x-viser-canvas-token`을 계속 요구한다.
+- token은 config/env에서만 주입하고 canvas persistence file에는 저장하지 않으며, provider/action/job route는 계속 노출하지 않는다.
+- `dashboard-check`는 token-protected dashboard에 Bearer auth header를 붙여 stale/auth-missing foreground process를 검증할 수 있게 했다.
+- local smoke는 dashboard-auth 단계로 unauthenticated access 거부, bearer-auth page access, canvas write-token 분리, provider 미호출을 검증한다.
+- 검증: `npm run typecheck -- --pretty false`, `npm test`(502 pass), `node src/index.ts smoke`(35 pass), `node src/index.ts verify --strict`(PASS: readiness 36 pass, audit 48 pass, smoke 35 pass), `node src/index.ts audit`(SAFE), `node src/index.ts release-evidence`(READY, completion은 live/competitor proof 부족으로 UNPROVEN)를 통과했다.
+
+## 2026-05-29 21단계: Continuous transcript voice loop로 dashboard UX 격차 추가 보강
+
+- OpenClaw/Hermes 대비 남은 voice UX gap 중 외부 microphone/STT dependency 없이 검증 가능한 연속 대화 loop를 추가했다.
+- `voice`/`voice-loop`/`voice-chat` 명령은 stdin transcript line을 `AssistantRuntime` turn으로 처리하고, `/exit`, `/quit`, `stop voice`, `stop listening`으로 안전하게 종료한다.
+- Transcript는 provider handoff 전에 control character와 과대 입력을 거부하고, `--propose-speak`는 응답을 즉시 읽지 않고 기존 approval-gated `/propose speak` action으로만 staging한다.
+- local smoke와 release evidence objective matrix는 voice-loop가 여러 transcript turn을 처리하고 각 응답을 승인 기반 TTS proposal로 연결하는지 검증한다.
+- hands-free microphone capture와 provider-native token streaming은 여전히 외부 환경 proof가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+- 검증: `npm run typecheck -- --pretty false`, focused `node --test test/voice.test.ts test/smoke.test.ts test/release-evidence.test.ts test/release-evidence-cli.test.ts test/state-health.test.ts`, `npm test`(504 pass), `node src/index.ts smoke`(36 pass), `node src/index.ts verify --strict`(PASS: readiness 36 pass, audit 48 pass, smoke 36 pass), `node src/index.ts audit`(SAFE), `node src/index.ts release-evidence`(READY, completion은 live/competitor proof 부족으로 UNPROVEN), `npm pack --dry-run --json`(87 files), `git diff --check`를 통과했다.
+
+## 2026-05-29 22단계: Automatic learning curator로 self-improvement gap 추가 보강
+
+- Hermes식 self-improving loop와의 격차를 줄이기 위해 수동 `/reflect-skill` 외에 `/curate-skills` learning curator를 추가했다.
+- Curator는 최근 session transcript를 provider-assisted reflection prompt로 보내 재사용 가능한 절차를 찾아내고, 결과를 즉시 저장하지 않고 기존 approval-gated `SKILL.md` write action으로만 staging한다.
+- Curation proof는 `reflection-proofs.jsonl`에 transcript message count/hash, provider, action id, target, `mode=curated`만 남기고 transcript 원문이나 생성 절차 본문은 중복 저장하지 않는다.
+- CLI top-level `node src/index.ts curate-skills ...`와 slash command `/curate-skills [focus]`를 모두 제공해 foreground workflow나 scheduler에서 `/schedule every 24h /curate-skills` 형태로 주기적 학습 loop를 구성할 수 있게 했다.
+- local smoke와 release evidence objective matrix는 automatic learning curator가 최근 session에서 reusable skill을 draft하고 같은 승인 gate/proof 경계를 쓰는지 검증한다.
+- 실 provider로 완료된 실제 작업을 닫힌 loop로 반영한 proof는 여전히 외부 환경 evidence가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+- 검증: `npm run typecheck -- --pretty false`, focused `node --test test/assistant.test.ts test/smoke.test.ts test/release-evidence.test.ts test/release-evidence-cli.test.ts`, `npm test`(505 pass), `node src/index.ts smoke`(37 pass), `node src/index.ts verify --strict`(PASS: readiness 36 pass, audit 48 pass, smoke 37 pass), `node src/index.ts audit`(SAFE), `node src/index.ts release-evidence`(READY, completion은 live/competitor proof 부족으로 UNPROVEN), `npm pack --dry-run --json`(87 files), `git diff --check`를 통과했다.
+
+## 2026-05-29 23단계: Provider stdout streaming surface로 UX gap 추가 보강
+
+- OpenClaw/Hermes 대비 남은 dashboard/voice UX gap 중 provider-native streaming에 가까운 로컬 CLI stdout streaming surface를 추가했다.
+- `runCommand`는 stdout/stderr chunk callback을 지원하되 `maxOutputBytes` capture limit 안의 chunk만 전달해 streaming이 최종 output cap을 우회하지 못하게 했다.
+- `CliModelProvider`는 streaming chunk와 최종 output 모두 provider/env secret redaction을 거친 뒤 반환하며, truncated secret prefix도 `[REDACTED]` 처리한다.
+- `AssistantRuntime`은 `onProviderOutputChunk`와 `suppressProviderText` 옵션을 받아 터미널이 provider stdout을 먼저 표시하면서도 최종 answer/session history 저장은 기존 경로로 유지한다.
+- `node src/index.ts ask --stream ...`와 `chat --stream`을 추가해 긴 provider 응답을 터미널에서 즉시 볼 수 있게 했다.
+- local smoke와 release evidence는 provider-stream 단계로 bounded stdout streaming과 session history 보존을 검증한다.
+- 실제 로그인된 Codex/Gemini/Claude CLI가 token 단위로 어떻게 flush하는지는 외부 live proof가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+- 검증: `npm run typecheck -- --pretty false`, focused `node --test test/exec.test.ts test/provider.test.ts test/assistant.test.ts test/smoke.test.ts test/release-evidence.test.ts test/release-evidence-cli.test.ts`, `npm test`(508 pass), `node src/index.ts smoke`(38 pass), `node src/index.ts verify --strict`(PASS: readiness 36 pass, audit 48 pass, smoke 38 pass), `node src/index.ts audit`(SAFE), `node src/index.ts release-evidence`(READY, completion은 live/competitor proof 부족으로 UNPROVEN), `npm pack --dry-run --json`(87 files), `git diff --check`를 통과했다.
+
+## 2026-05-29 24단계: Browser-side microphone transcript capture로 voice UX gap 추가 보강
+
+- OpenClaw/Hermes 대비 남은 voice UX gap 중 외부 서버 STT provider 없이 줄일 수 있는 browser microphone capture surface를 dashboard에 추가했다.
+- `/voice.html`과 `/dashboard.voice.html`은 browser `SpeechRecognition`/`webkitSpeechRecognition`만 사용해 final transcript line을 모으고, 사용자가 복사하거나 `transcript-lines.txt`로 내려받아 `node src/index.ts voice --propose-speak < transcript-lines.txt`로 승인 기반 TTS voice loop에 연결할 수 있게 했다.
+- 이 route는 dashboard 인증 경계 안에 있으며 provider 호출, action/job/write route, transcript persistence를 추가하지 않는다.
+- Dashboard home, README, dashboard-check, smoke, release-evidence를 갱신해 browser-side voice capture page가 존재하고 provider/action/job route 없이 제공되는지 검증한다.
+- 실제 browser microphone permission/capture와 로그인된 provider CLI의 native token streaming은 외부 live environment proof가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+- 검증: `npm run typecheck -- --pretty false`, focused `node --test test/web-dashboard.test.ts test/dashboard-check.test.ts test/smoke.test.ts test/release-evidence.test.ts test/release-evidence-cli.test.ts`, `npm test`(509 pass), `node src/index.ts smoke`(39 pass), `node src/index.ts verify --strict`(PASS: readiness 36 pass, audit 48 pass, smoke 39 pass), `node src/index.ts audit`(SAFE), `node src/index.ts release-evidence`(READY, completion은 live/competitor proof 부족으로 UNPROVEN), `npm pack --dry-run --json`(87 files), `git diff --check`를 통과했다.
+
+## 2026-05-29 25단계: Browser-side camera/screen capture로 multimodal UX gap 추가 보강
+
+- OpenClaw가 Android node에서 Camera/Screen capture surface를 제공한다고 문서화하므로, 외부 앱이나 서버 업로드 없이 줄일 수 있는 multimodal dashboard gap을 보강했다.
+- `/capture.html`과 `/dashboard.capture.html`은 browser `navigator.mediaDevices.getUserMedia`/`getDisplayMedia`만 사용해 local camera 또는 screen preview를 열고, 사용자가 현재 frame을 PNG로 내려받을 수 있게 했다.
+- 이 route는 기존 dashboard 인증 경계 안에 있으며 provider 호출, action/job/write route, media upload, capture persistence를 추가하지 않는다.
+- CSP는 `img-src`/`media-src`를 self/data/blob로만 좁혀 browser-side preview/download가 동작하게 하되 외부 fetch나 remote media embedding surface는 열지 않았다.
+- Dashboard home, README, dashboard-check, smoke, release-evidence, regression test를 갱신해 browser-side camera/screen capture page가 provider/action/job route 없이 제공되는지 검증한다.
+- 실제 browser microphone/camera/screen permission capture와 로그인된 provider CLI의 native token streaming은 외부 live environment proof가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+- 검증: `npm run typecheck -- --pretty false`, focused `node --test test/web-dashboard.test.ts test/dashboard-check.test.ts test/smoke.test.ts test/release-evidence.test.ts test/release-evidence-cli.test.ts`, `npm test`(510 pass), `node src/index.ts smoke`(40 pass), `node src/index.ts verify --strict`(PASS: readiness 36 pass, audit 48 pass, smoke 40 pass), `node src/index.ts audit`(SAFE), `node src/index.ts release-evidence`(READY, completion은 live/competitor proof 부족으로 UNPROVEN), `npm pack --dry-run --json`(87 files), `git diff --check`를 통과했다.
+
+## 2026-05-29 26단계: Local sendmail Email connector로 channel breadth 추가 보강
+
+- OpenClaw/Hermes 대비 남은 channel-breadth 격차를 더 줄이기 위해 SMTP credential을 저장하지 않는 로컬 sendmail-compatible Email outbound sender를 추가했다.
+- `src/connectors/email.ts`는 `EMAIL_SENDMAIL_COMMAND`, `EMAIL_FROM`, `EMAIL_RECIPIENT`, `EMAIL_RECIPIENTS`로 envelope/alias를 구성하고, `sendmail -t` 호환 plain RFC822 message를 stdin으로 전달한다.
+- Email은 inbound bridge가 아니라 `/propose message email:<recipient-alias> | <text>`와 scheduler delivery에 붙는 approval-gated outbound surface로 제한했다.
+- recipient alias, from/recipient address, message body, local sendmail error detail은 audit/backup/error/release-evidence 경로에서 redacted되도록 했다.
+- config/types/readiness/env/audit/dashboard/MCP/action/scheduler/notifier/release-evidence/smoke/docs/test 경로를 Email까지 확장했다.
+- 실제 로컬 MTA가 외부 메일을 배송하는 live proof와 Hermes/OpenClaw same-host benchmark artifact는 여전히 외부 환경 증거가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+- 검증: `npm run typecheck -- --pretty false`, `npm test`(512 pass), `node src/index.ts smoke`(41 pass), `node src/index.ts verify --strict`(PASS: readiness 37 pass, audit 49 pass, smoke 41 pass), `node src/index.ts audit`(SAFE: 49 pass), `node src/index.ts release-evidence`(READY, completion은 live/competitor proof 부족으로 UNPROVEN), `npm pack --dry-run --json`(88 files), `git diff --check`를 통과했다.
+
+## 2026-05-29 27단계: DingTalk/WeCom outbound connector로 China workplace channel breadth 보강
+
+- OpenClaw/Hermes 대비 남은 channel-breadth 격차를 줄이기 위해 DingTalk custom robot과 WeCom group robot webhook outbound connector를 추가했다.
+- `src/connectors/dingtalk.ts`는 `DINGTALK_WEBHOOK_URL`/`DINGTALK_WEBHOOKS`에서 `https://oapi.dingtalk.com/robot/send?access_token=...` 형태만 허용하고, `msgtype=text` payload를 승인된 `/propose message dingtalk:<webhook-alias>` 경로로 보낸다.
+- `src/connectors/wecom.ts`는 `WECOM_WEBHOOK_URL`/`WECOM_WEBHOOKS`에서 `https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...` 형태만 허용하고, `msgtype=text` payload를 승인된 `/propose message wecom:<webhook-alias>` 경로로 보낸다.
+- 두 connector 모두 HTTP non-2xx와 JSON `errcode`/`code` non-zero를 실패로 처리하고, webhook URL, alias, message body, remote error detail은 audit/backup/error/release-evidence 경로에서 redacted되도록 했다.
+- config/types/readiness/env/audit/dashboard/MCP/action/scheduler/notifier/release-evidence/smoke/docs/test 경로를 DingTalk/WeCom까지 확장하고, scheduler delivery mapping의 누락된 `email:*` 분기도 함께 보강했다.
+- local smoke는 approval-gated outbound DingTalk/WeCom proposal과 mocked direct sender를 검증하고, release evidence objective matrix는 source/objective/smoke/live connector catalog에 두 connector를 포함한다.
+- 실제 DingTalk/WeCom tenant webhook으로 메시지가 도착하는 live proof, Hermes/OpenClaw channel catalog parity의 외부 검증, same-host benchmark artifact는 여전히 외부 환경 증거가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+- 검증: `npm run typecheck -- --pretty false`, focused `node --test test/connectors.test.ts test/validate.test.ts test/actions.test.ts test/connector-access.test.ts test/readiness.test.ts test/next-steps.test.ts test/release-evidence.test.ts test/smoke.test.ts test/audit.test.ts test/backup.test.ts test/config-validation.test.ts`(208 pass), `npm test`(514 pass), `node src/index.ts smoke`(43 pass), `node src/index.ts verify --strict`(PASS: readiness 39 pass, audit 51 pass, smoke 43 pass), `node src/index.ts audit`(SAFE: 51 pass), `node src/index.ts release-evidence`(READY, completion은 live/competitor proof 부족으로 UNPROVEN), `npm pack --dry-run --json`(90 files), `git diff --check`를 통과했다.
+
+## 2026-05-29 28단계: Zalo OA outbound connector로 Vietnam channel breadth 보강
+
+- OpenClaw/Hermes 대비 남은 channel-breadth 격차를 줄이기 위해 Zalo Official Account Messages API outbound connector를 추가했다.
+- `src/connectors/zalo.ts`는 `ZALO_OA_ACCESS_TOKEN`, `ZALO_RECIPIENT_ID`, `ZALO_RECIPIENTS`에서 access token과 recipient alias를 구성하고, `https://openapi.zalo.me/v2.0/oa/message`로 text payload를 전송한다.
+- Zalo는 inbound bridge가 아니라 `/propose message zalo:<recipient-alias> | <text>`와 scheduler delivery에 붙는 approval-gated outbound surface로 제한했다.
+- HTTP non-2xx와 Zalo JSON error/code non-zero를 실패로 처리하고, access token, user id, alias, message body, remote error detail은 config/audit/backup/error/release-evidence 경로에서 redacted되도록 했다.
+- config/types/readiness/env/audit/dashboard/MCP/action/scheduler/notifier/release-evidence/smoke/docs/test 경로를 Zalo까지 확장했다.
+- local smoke는 approval-gated outbound Zalo proposal과 mocked direct OA sender를 검증하고, release evidence objective matrix는 source/objective/smoke/live connector catalog에 Zalo를 포함한다.
+- 실제 Zalo OA token으로 메시지가 도착하는 live proof, Hermes/OpenClaw channel catalog parity의 외부 검증, same-host benchmark artifact는 여전히 외부 환경 증거가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+- 검증: `npm run typecheck -- --pretty false`, focused `node --test test/connectors.test.ts test/validate.test.ts test/actions.test.ts test/connector-access.test.ts test/readiness.test.ts test/next-steps.test.ts test/release-evidence.test.ts test/smoke.test.ts test/audit.test.ts test/backup.test.ts test/config-validation.test.ts`, `npm test`(515 pass), `node src/index.ts smoke`(44 pass), `node src/index.ts verify --strict`(PASS: readiness 40 pass, audit 52 pass, smoke 44 pass), `node src/index.ts audit`(SAFE: 52 pass), `node src/index.ts release-evidence`(READY, completion은 live/competitor proof 부족으로 UNPROVEN), `npm pack --dry-run --json`(91 files), `git diff --check`를 통과했다.
+
+## 2026-05-29 29단계: IRC outbound connector로 legacy chat channel breadth 보강
+
+- OpenClaw/Hermes 대비 남은 channel-breadth 격차를 줄이기 위해 no-dependency IRC channel PRIVMSG outbound connector를 추가했다.
+- `src/connectors/irc.ts`는 `IRC_HOST`, `IRC_PORT`, `IRC_TLS`, `IRC_NICK`, `IRC_PASSWORD`, `IRC_CHANNEL`, `IRC_CHANNELS`로 server/channel alias를 구성하고, TLS 기본값의 IRC connection에서 `NICK`/`USER` 등록 뒤 bounded `PRIVMSG`를 보낸다.
+- IRC는 inbound bridge가 아니라 `/propose message irc:<channel-alias> | <text>`와 scheduler delivery에 붙는 approval-gated outbound surface로 제한했다.
+- host, nick, password, channel, alias, message body, remote error detail은 audit/backup/error/release-evidence 경로에서 redacted되도록 했다.
+- config/types/readiness/env/audit/dashboard/MCP/action/scheduler/notifier/release-evidence/smoke/docs/test 경로를 IRC까지 확장했다.
+- local smoke는 approval-gated outbound IRC proposal을 injectable connector runner로 검증하고, direct sender는 mocked runner로 PRIVMSG input normalization/redaction을 검증한다. TCP listener는 sandbox-safe smoke를 위해 쓰지 않는다.
+- 실제 IRC network/server delivery proof, Hermes/OpenClaw channel catalog parity의 외부 검증, same-host benchmark artifact는 여전히 외부 환경 증거가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+- 검증: `npm run typecheck -- --pretty false`, focused `node --test test/connectors.test.ts test/validate.test.ts test/actions.test.ts test/connector-access.test.ts test/readiness.test.ts test/next-steps.test.ts test/release-evidence.test.ts test/smoke.test.ts test/audit.test.ts test/backup.test.ts test/config-validation.test.ts`(210 pass), `npm test`(516 pass), `node src/index.ts smoke`(45 pass), `node src/index.ts verify --strict`(PASS: readiness 41 pass, audit 53 pass, smoke 45 pass), `node src/index.ts audit`(SAFE: 53 pass), `node src/index.ts release-evidence`(READY, completion은 live/competitor proof 부족으로 UNPROVEN), `npm pack --dry-run --json`(92 files), `git diff --check`를 통과했다.
+
+## 2026-05-29 30단계: Nextcloud Talk outbound connector로 self-hosted chat channel breadth 보강
+
+- OpenClaw/Hermes 대비 남은 channel-breadth 격차를 줄이기 위해 Nextcloud Talk OCS Chat API outbound connector를 추가했다.
+- `src/connectors/nextcloud-talk.ts`는 `NEXTCLOUD_TALK_BASE_URL`, `NEXTCLOUD_TALK_USERNAME`, `NEXTCLOUD_TALK_APP_PASSWORD`, `NEXTCLOUD_TALK_ROOM_TOKEN`, `NEXTCLOUD_TALK_ROOMS`로 self-hosted Talk room alias를 구성하고, `POST <base>/ocs/v2.php/apps/spreed/api/v1/chat/<room-token>`로 bounded text payload를 전송한다.
+- Nextcloud Talk는 inbound bridge가 아니라 `/propose message nextcloud-talk:<room-alias> | <text>`와 scheduler delivery에 붙는 approval-gated outbound surface로 제한했다.
+- base URL, username, app password, room token, alias, message body, remote error detail은 config/audit/backup/error/release-evidence 경로에서 redacted되도록 했다.
+- config/types/readiness/env/audit/dashboard/MCP/action/scheduler/notifier/release-evidence/smoke/docs/test 경로를 Nextcloud Talk까지 확장했다.
+- local smoke는 approval-gated outbound Nextcloud Talk proposal과 mocked OCS direct sender를 검증하고, release evidence objective matrix는 source/objective/smoke/live connector catalog에 Nextcloud Talk를 포함한다.
+- 실제 Nextcloud Talk server/app password로 메시지가 도착하는 live proof, Hermes/OpenClaw channel catalog parity의 외부 검증, same-host benchmark artifact는 여전히 외부 환경 증거가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+- 검증: `npm run typecheck -- --pretty false`, focused `node --test test/connectors.test.ts test/validate.test.ts test/actions.test.ts test/connector-access.test.ts test/access.test.ts test/config-validation.test.ts test/readiness.test.ts test/next-steps.test.ts test/release-evidence.test.ts test/smoke.test.ts test/audit.test.ts test/backup.test.ts`(217 pass), `npm test`(517 pass), `node src/index.ts smoke`(46 pass), `node src/index.ts verify --strict`(PASS: readiness 42 pass, audit 54 pass, smoke 46 pass), `node src/index.ts audit`(SAFE: 54 pass), `node src/index.ts release-evidence`(READY, completion은 live/competitor proof 부족으로 UNPROVEN), `npm pack --dry-run --json`(93 files), `git diff --check`를 통과했다.
+
+## 2026-05-29 31단계: Localhost WebChat으로 browser chat UX gap 보강
+
+- OpenClaw/Hermes 대비 남은 browser-first chat UX gap을 줄이기 위해 localhost 전용 `/chat.html`과 `/dashboard.chat.html` WebChat surface를 추가했다.
+- Dashboard의 기존 read-only/status/canvas/voice/capture route는 계속 provider-free로 유지하고, `/chat.json`만 명시적으로 `AssistantRuntime`에 연결되는 provider-calling route로 분리했다.
+- `/chat.html`은 local request(`127.0.0.1`/`::1`/`localhost`)에서만 열리고, POST `/chat.json`은 per-process same-origin `x-viser-web-chat-token`, `application/json`, 16KB body cap, 8K message cap, safe provider id normalization을 통과해야 한다.
+- Remote-capable dashboard를 쓰더라도 WebChat은 공개 surface가 되지 않도록 localhost-only로 남기고, remote 접속이 필요하면 SSH tunnel로 localhost 경계를 유지하라고 README/SECURITY/PRIVACY에 명시했다.
+- `dashboard-check`, local smoke, release evidence는 `/chat.html` contract, missing token 거부, token-protected mocked provider round-trip, WebChat source bookkeeping을 검증한다.
+- 실제 로그인된 provider CLI로 browser WebChat을 사용하는 live proof, real-provider skill-learning proof, Hermes/OpenClaw same-host benchmark artifact는 여전히 외부 환경 증거가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+- 검증: `npm run typecheck -- --pretty false`, focused `node --test test/web-dashboard.test.ts test/dashboard-check.test.ts test/smoke.test.ts test/release-evidence.test.ts test/state-health.test.ts`(50 pass), `npm test`(518 pass), `node src/index.ts smoke`(47 pass), `node src/index.ts verify --strict`(PASS: readiness 42 pass, audit 54 pass, smoke 47 pass), `node src/index.ts audit`(SAFE: 54 pass), `node src/index.ts release-evidence`(READY, completion은 live/competitor proof 부족으로 UNPROVEN), `npm pack --dry-run --json`(93 files), `git diff --check`를 통과했다.
+
+## 2026-05-29 32단계: Live evidence 확보 시도와 남은 외부 blocker 기록
+
+- 전체 목표를 완료로 닫을 수 있는지 확인하기 위해 `node src/index.ts release-evidence --strict --live --probe-all-providers`를 실제 실행했다.
+- 결과는 release artifact 자체는 READY였지만 completion audit은 UNPROVEN으로 유지됐다.
+- Live provider proof에서는 `codex`, `gpt`, `gemini`가 local CLI probe에 응답했고, Discord live token은 accepted로 확인됐다.
+- `claude` command가 현재 PATH/default fallback path에 없어 all-provider proof가 실패했으므로 Claude Code 설치·로그인 후 `node src/index.ts provider-guide claude --probe`와 strict live evidence를 다시 실행해야 한다.
+- Telegram/Slack/Matrix/Signal/iMessage/WhatsApp/LINE/Google Chat/Teams/Mattermost/Rocket.Chat/Feishu/DingTalk/WeCom/Zalo/IRC/Nextcloud Talk/Webex/Zulip/Email은 이번 환경에 token/command가 구성되지 않아 live connector proof가 disabled로 남았다.
+- `hermes`, `openclaw`, `claude` executable은 현재 shell lookup에서 발견되지 않아 같은 host의 경쟁 benchmark와 all-provider proof를 지금 완료할 수 없었다.
+- 이 단계는 코드 변경이 아니라 완료 판정용 외부 증거 확인 단계이며, 검증: `node src/index.ts release-evidence --strict --live --probe-all-providers`(exit 1, READY but completion UNPROVEN; codex/gpt/gemini pass, claude missing, Discord token accepted, remaining connectors disabled), `command -v hermes/openclaw/claude`(not found), `git diff --check`를 통과했다.
+
+## 2026-05-29 33단계: Generic HTTPS webhook outbound connector로 long-tail channel breadth 보강
+
+- OpenClaw/Hermes 대비 남은 channel-breadth 격차 중 platform-specific connector를 계속 추가하지 않아도 custom/self-hosted bridge에 붙일 수 있는 범용 outbound surface를 보강했다.
+- `src/connectors/generic-webhook.ts`는 `VISER_WEBHOOK_URL`/`VISER_WEBHOOKS`에서 `https://` URL과 alias map을 구성하고, 승인된 `/propose message webhook:<webhook-alias> | <text>` 또는 scheduler delivery만 `{ source: "viser", text, sentAt }` JSON payload로 전송한다.
+- URL username/password credential, non-HTTPS URL, 과대 alias를 거부하고, webhook URL·alias·message body·remote error detail은 sender/readiness/audit/backup/release-evidence 경로에서 redacted되도록 했다.
+- Config/types/readiness/env/audit/doctor/dashboard/MCP/action/scheduler/notifier/release-evidence/smoke/docs/test 경로를 generic Webhook까지 확장했고, CLI `pair-code`/`allow`/`revoke` access parsing 누락도 함께 보강했다.
+- Local smoke는 approval-gated outbound generic Webhook proposal과 mocked direct sender를 검증하고, release evidence objective matrix는 source/objective/smoke/live connector catalog에 `webhook`을 포함한다.
+- 실제 custom webhook endpoint로 메시지가 도착하는 live proof, Claude CLI proof, Hermes/OpenClaw same-host benchmark artifact는 여전히 외부 환경 증거가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+- 검증: `npm run typecheck -- --pretty false`, focused `node --test test/connectors.test.ts test/validate.test.ts test/actions.test.ts test/connector-access.test.ts test/smoke.test.ts test/audit.test.ts test/config-validation.test.ts test/env.test.ts test/state-health.test.ts test/readiness.test.ts test/next-steps.test.ts test/release-evidence.test.ts`(238 pass), `npm test`(519 pass), `node src/index.ts smoke`(48 pass), `node src/index.ts verify --strict`(PASS: readiness 43 pass, audit 55 pass, smoke 48 pass), `node src/index.ts audit`(SAFE: 55 pass), `node src/index.ts release-evidence`(READY, completion은 live/competitor proof 부족으로 UNPROVEN), `node src/index.ts release-evidence --strict --live --probe-all-providers`(exit 1, READY but completion UNPROVEN; codex/gpt/gemini pass, claude missing, Discord token accepted, most connector tokens including generic Webhook disabled), `npm pack --dry-run --json`(94 files), `git diff --check`를 통과했다.
+
+## 2026-05-29 34단계: Home Assistant REST service-call connector로 smart-home action breadth 보강
+
+- OpenClaw/Hermes 대비 남은 device/smart-home action gap을 줄이기 위해 Home Assistant REST API service-call outbound connector를 추가했다.
+- `src/connectors/home-assistant.ts`는 `HOME_ASSISTANT_BASE_URL`, `HOME_ASSISTANT_ACCESS_TOKEN`, `HOME_ASSISTANT_SERVICE`, `HOME_ASSISTANT_SERVICES`로 service alias를 구성하고, 승인된 `/propose message home-assistant:<service-alias> | <text>` 또는 scheduler delivery만 `POST <base>/api/services/<domain>/<service>`로 전송한다.
+- 기본 text payload는 `{ "message": text }`로 감싸고, JSON object text는 그대로 service payload로 전달해 notification부터 script/scene/light 같은 service call까지 같은 approval gate 안에서 확장할 수 있게 했다.
+- Public HTTPS를 기본으로 요구하되 localhost/private LAN HTTP는 Home Assistant 로컬 배포를 위해 허용하고, base URL/access token/service alias/payload/remote detail은 validation, sender, audit, release evidence, error path에서 redacted되도록 했다.
+- Config/types/readiness/env/audit/doctor/dashboard/MCP/action/scheduler/notifier/release-evidence/smoke/docs/test 경로를 Home Assistant까지 확장했고, CLI `pair-code`/`allow`/`revoke` access parsing과 scheduler delivery mapping도 함께 보강했다.
+- Local smoke는 approval-gated outbound Home Assistant proposal과 mocked REST direct sender를 검증하고, release evidence objective matrix는 source/objective/smoke/live connector catalog에 `home-assistant`를 포함한다.
+- 실제 Home Assistant instance/token/service call delivery proof, Claude CLI proof, Hermes/OpenClaw same-host benchmark artifact는 여전히 외부 환경 증거가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+- 검증: `npm run typecheck -- --pretty false`, focused `node --test test/connectors.test.ts test/validate.test.ts test/actions.test.ts test/access.test.ts test/connector-access.test.ts`(125 pass), focused release/checklist `node --test test/audit.test.ts test/verify.test.ts test/next-steps.test.ts test/preflight.test.ts test/gateway-cli.test.ts test/launch-status.test.ts test/release-evidence.test.ts`(74 pass), `npm test`(521 pass), `node src/index.ts smoke`(49 pass), `node src/index.ts verify --strict`(PASS: readiness 44 pass, audit 56 pass, smoke 49 pass), `node src/index.ts audit`(SAFE: 56 pass), `node src/index.ts release-evidence`(READY, completion은 live/competitor proof 부족으로 UNPROVEN), `node src/index.ts release-evidence --strict --live --probe-all-providers`(exit 1, READY but completion UNPROVEN; codex/gpt/gemini pass, claude missing, Discord token accepted, Home Assistant 포함 대부분 connector tokens disabled), `npm pack --dry-run --json`(95 files), `git diff --check`를 통과했다.
+
+## 2026-05-29 35단계: Twitch IRC outbound connector로 livestream channel breadth 보강
+
+- OpenClaw 공식 채널 목록에 Twitch가 포함되어 있어 남은 channel-breadth gap을 줄이기 위해 Twitch chat IRC outbound connector를 추가했다.
+- `src/connectors/twitch.ts`는 `TWITCH_ACCESS_TOKEN`, `TWITCH_BOT_USERNAME`, `TWITCH_CHANNEL`, `TWITCH_CHANNELS`로 channel alias를 구성하고, Twitch IRC TLS endpoint(`irc.chat.twitch.tv:6697`)에 `PASS oauth:<token>`/`NICK`/`JOIN` 후 bounded `PRIVMSG`를 보낸다.
+- Twitch는 inbound bridge가 아니라 `/propose message twitch:<channel-alias> | <text>`와 scheduler delivery에 붙는 approval-gated outbound surface로 제한했다.
+- OAuth token은 config/runtime에서만 쓰고 runner input에는 prefix 없는 token으로 normalize하며, token·bot username·channel·alias·message body·remote detail은 validation/sender/audit/release-evidence error path에서 redacted되도록 했다.
+- Config/types/readiness/env/audit/doctor/dashboard/MCP/action/scheduler/notifier/release-evidence/smoke/docs/test 경로를 Twitch까지 확장했고, CLI `pair-code`/`allow`/`revoke` access parsing과 package/docs 예시도 함께 보강했다.
+- Local smoke는 approval-gated outbound Twitch proposal과 mocked IRC direct sender를 검증하고, release evidence objective matrix는 source/objective/smoke/live connector catalog에 `twitch`를 포함한다.
+- 실제 Twitch OAuth token/channel delivery proof, Claude CLI proof, Hermes/OpenClaw same-host benchmark artifact는 여전히 외부 환경 증거가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+- 검증: `npm run typecheck -- --pretty false`, focused `node --test test/connectors.test.ts test/validate.test.ts test/actions.test.ts test/access.test.ts test/connector-access.test.ts test/readiness.test.ts test/next-steps.test.ts test/release-evidence.test.ts test/smoke.test.ts test/audit.test.ts test/config-validation.test.ts test/env.test.ts test/state-health.test.ts`(247 pass), `npm test`(522 pass), `node src/index.ts smoke`(50 pass), `node src/index.ts verify --strict`(PASS: readiness 45 pass, audit 57 pass, smoke 50 pass), `node src/index.ts audit`(SAFE: 57 pass), `node src/index.ts release-evidence`(READY, completion은 live/competitor proof 부족으로 UNPROVEN), `node src/index.ts release-evidence --strict --live --probe-all-providers`(exit 1, READY but completion UNPROVEN; codex/gpt/gemini pass, claude missing, Discord token accepted, Twitch 포함 대부분 connector tokens disabled), `npm pack --dry-run --json`(96 files), `git diff --check`를 통과했다.
+
+## 2026-05-29 36단계: Generic inbound Webhook으로 automation trigger breadth 보강
+
+- OpenClaw가 gateway/webhook/automation trigger를 강조하므로, Viser의 기존 generic Webhook outbound sender에 반대 방향의 token-protected inbound automation trigger를 추가했다.
+- `connectors.webhook.inboundEnabled`, `VISER_WEBHOOK_INBOUND_TOKEN`, `connectors.webhook.inboundPath`, `connectors.webhook.inboundMaxInputChars`를 추가하고, foreground web dashboard HTTP server가 `POST <inboundPath>` JSON payload를 받을 때만 `AssistantRuntime`으로 전달하게 했다.
+- Inbound payload는 `{ "source": "ops", "text": "...", "providerId": "..." }` 같은 bounded JSON object만 허용하고, session은 `webhook:<source>`로 분리한다.
+- Dashboard login cookie와 별도로 `x-viser-webhook-token` 또는 `Authorization: Bearer ...` shared token을 요구하며, token은 24자 이상 단일 line이어야 하고 error/audit/release path에서 redacted된다.
+- Dashboard/canvas/chat route와 겹치는 inbound path는 config validation에서 거부하고, inbound webhook이 켜졌는데 webDashboard server가 꺼져 있으면 readiness/audit에서 막는다.
+- README/SECURITY/PRIVACY/.env.example/config example/env-check/release evidence/smoke/test를 갱신해 이 route가 provider-calling surface임을 명확히 하고, dashboard provider-free route와 경계를 분리했다.
+- 실제 remote automation system에서 HTTPS proxy를 거쳐 provider가 응답하는 live proof, Claude CLI proof, Hermes/OpenClaw same-host benchmark artifact는 여전히 외부 환경 증거가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+- 검증: `npm run typecheck -- --pretty false`, focused `node --test test/connectors.test.ts test/web-dashboard.test.ts test/smoke.test.ts test/release-evidence.test.ts test/validate.test.ts test/config-validation.test.ts test/env.test.ts test/readiness.test.ts test/audit.test.ts`(173 pass), `npm test`(524 pass), `node src/index.ts smoke`(51 pass), `node src/index.ts verify --strict`(PASS: readiness 45 pass, audit 57 pass, smoke 51 pass), `node src/index.ts audit`(SAFE: 57 pass), `node src/index.ts release-evidence`(READY, completion은 live/competitor proof 부족으로 UNPROVEN), `node src/index.ts release-evidence --strict --live --probe-all-providers`(exit 1, READY but completion UNPROVEN; codex/gpt/gemini pass, claude missing, Discord token accepted, generic inbound Webhook live remote proof 포함 외부 증거 부족), `npm pack --dry-run --json`(96 files), `git diff --check`를 통과했다.
+
+## 2026-05-29 37단계: Generic inbound Webhook attachment context 보강
+
+- OpenClaw가 inbound webhook과 media/attachment 흐름을 제공하므로, Viser의 generic inbound Webhook이 텍스트만 받던 gap을 줄이기 위해 bounded attachment metadata/text ingestion을 추가했다.
+- `attachments[]`는 최대 5개로 제한하고, `name`/`filename`, `type`/`mimeType`, credential-free `https://` URL, `sizeBytes`, 2000자 이하 text/caption/description만 정규화해 provider prompt에 붙인다.
+- Viser는 inbound attachment 원본 파일을 다운로드하거나 저장하지 않으며, attachment-only payload도 안전한 기본 prompt로 처리한다. Web dashboard body limit은 text + attachment excerpt cap에 맞춰 계산하도록 공통 helper로 분리했다.
+- README/SECURITY/PRIVACY/release-evidence/smoke 문구를 업데이트해 attachment context는 provider-bound prompt context이며 live browser/provider proof는 여전히 필요하다고 명시했다.
+- 실제 remote automation system에서 HTTPS proxy를 거쳐 provider가 attachment context까지 처리하는 live proof, Claude/Codex/Gemini logged-in CLI proof, Hermes/OpenClaw same-host benchmark artifact는 여전히 외부 환경 증거가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+- 검증: `npm run typecheck -- --pretty false`, focused `node --test test/connectors.test.ts test/web-dashboard.test.ts test/smoke.test.ts test/release-evidence.test.ts`(75 pass), `npm test`(525 pass), `node src/index.ts smoke`(51 pass), `node src/index.ts verify --strict`(PASS: readiness 45 pass, audit 57 pass, smoke 51 pass), `node src/index.ts audit`(SAFE: 57 pass), `node src/index.ts release-evidence`(READY, completion은 live/competitor proof 부족으로 UNPROVEN), `node src/index.ts release-evidence --strict --live --probe-all-providers`(exit 1, BLOCKED/UNPROVEN; live provider/connector/token proof 부족), `npm pack --dry-run --json`(96 files), `git diff --check`를 통과했다.
+
+## 2026-05-29 38단계: Guarded web-fetch 도구로 web tool gap 보강
+
+- OpenClaw가 `web_fetch`/`web_search` 계열 web tools를 제공하므로, Viser의 explicit local tools surface에 dependency-free `web-fetch`를 추가해 특정 URL의 readable text/html/json/xml을 가져올 수 있게 했다.
+- `web-fetch`는 provider hidden tool이 아니라 기존 `/tool` 경계 안의 명시적 read-only 도구로 유지했다. URL credential, localhost/`.local`/single-label internal host, private/link-local/loopback/reserved IP, private DNS result, private/internal redirect를 차단하고, JavaScript는 실행하지 않으며 script/style/noscript를 제거한 readable text만 반환한다.
+- `tools.webFetch` config를 추가해 `enabled`, `maxResponseBytes`, `timeoutMs`, `maxRedirects`, `userAgent`를 검증 가능하게 했고, README/SECURITY/PRIVACY/release-evidence/smoke에 web-fetch 경계와 증거를 반영했다.
+- 실제 provider-backed web search, browser automation 수준의 JS/login 페이지 처리, Hermes/OpenClaw same-host benchmark artifact는 여전히 외부/추가 증거가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+- 검증: `npm run typecheck -- --pretty false`, focused `node --test test/tools.test.ts test/smoke.test.ts test/release-evidence.test.ts test/config-validation.test.ts`(44 pass), `npm test`(527 pass), `node src/index.ts smoke`(52 pass), `node src/index.ts verify --strict`(PASS: readiness 45 pass, audit 57 pass, smoke 52 pass), `node src/index.ts audit`(SAFE: 57 pass), `node src/index.ts release-evidence`(READY, completion은 live/competitor proof 부족으로 UNPROVEN), `node src/index.ts release-evidence --strict --live --probe-all-providers`(exit 1, BLOCKED/UNPROVEN; live provider/connector/token proof 부족), `npm pack --dry-run --json`(96 files), `git diff --check`를 통과했다.
+
+## 2026-05-29 39단계: MCP guarded web-fetch surface 보강
+
+- 38단계에서 추가한 `/tool web-fetch`가 CLI slash-command 경로에만 있어 외부 MCP client 관점의 web tool parity 증거가 약했다.
+- `src/connectors/mcp-server.ts`에 read-only `viser_web_fetch` MCP tool을 추가했다. 이 tool은 provider 호출이나 `/approve` 실행 없이 기존 `/tool web-fetch` SSRF/redirect/byte cap 경계를 그대로 통과해 public HTTP(S) readable text/html/json/xml만 반환한다.
+- MCP command bridge에서 URL/maxChars를 shell이 아닌 slash-command token으로만 넘기므로 whitespace/quote/control char가 있는 MCP argument는 즉시 거부한다.
+- `test/mcp-server.test.ts`와 local smoke에 MCP web-fetch regression을 추가해 JavaScript 제거, private/internal host 차단, provider-call 없음이 증거로 남게 했다.
+- README/SECURITY/PRIVACY/release-evidence 문서를 MCP `viser_web_fetch` 경계와 smoke evidence에 맞게 갱신했다.
+
+Verification:
+- `npm run typecheck -- --pretty false` 통과.
+- `node --test test/mcp-server.test.ts test/smoke.test.ts test/release-evidence.test.ts` 통과: 19 pass, 0 fail.
+- `node src/index.ts smoke` 통과: 55 pass, 0 fail. 새 `[mcp-web-fetch]` smoke가 provider 호출 없이 readable text와 script 제거를 검증했고, 기존 file-search/MCP file-search smoke도 최신 코드 기준으로 함께 통과했다.
+- `test/tools.test.ts`의 search-files symlink fixture를 보정해, symlink target이 allowed root 내부 real directory가 아니라 실제 outside temp directory가 되도록 만들었다. 이로써 "symlinked tree를 검색하지 않는다"는 회귀 테스트 의도가 실제 보안 경계와 일치한다.
+- `npm test` 통과: 530 pass, 0 fail.
+- `node src/index.ts verify --strict` 통과: readiness READY(45 pass), audit SAFE(57 pass), local smoke PASS(55 pass).
+- `node src/index.ts audit` 통과: SAFE(57 pass, 0 warn, 0 fail).
+- `node src/index.ts release-evidence` 통과: READY, local smoke 55 pass, completion은 기존 live/external proof 때문에 UNPROVEN 유지.
+- `node src/index.ts release-evidence --strict --live --probe-all-providers`는 예상대로 exit 1/BLOCKED: local smoke는 통과하지만 실제 provider CLI login/connector token proof가 현재 환경에서 미충족.
+- `npm pack --dry-run --json` 통과: 96 entries.
+- `git diff --check` 통과.
+
+## 2026-05-29 40단계: Guarded file-search 도구와 MCP surface 보강
+
+- OpenClaw/Hermes식 tool ecosystem gap을 더 줄이기 위해, 숨겨진 model tool이 아니라 기존 `/tool` 경계 안에 `search-files <query> [path] [maxMatches]`를 추가했다.
+- `search-files`는 allowed read root 안에서 literal text만 찾고 symlink를 따라가지 않으며, `.env*`, `.npmrc`, `.viser`, `.omx`, `.git`, `node_modules` 같은 private/heavy entry를 기본 skip한다. 파일별 첫 64KB, 최대 2,000 files, 최대 200 matches로 제한해 private runtime state와 대용량 tree를 무심코 쓸어 담지 않게 했다.
+- MCP client에서도 같은 경계를 쓰도록 `viser_search_files` read-only tool을 추가했고, provider 호출이나 `/approve` 실행 없이 결과만 반환하도록 했다.
+- Local smoke와 release evidence objective matrix를 갱신해 CLI file search와 MCP file search가 provider 호출 없이 동작한다는 증거를 남긴다. 실제 provider-backed web search/browser automation과 live competitor benchmark는 여전히 외부 proof가 필요하므로 completion audit은 UNPROVEN으로 유지한다.
+- 검증: `npm run typecheck -- --pretty false`, focused `node --test test/tools.test.ts test/mcp-server.test.ts test/smoke.test.ts test/release-evidence.test.ts`(40 pass), `npm test`(530 pass), `node src/index.ts verify --strict`(PASS: readiness 45 pass, audit 57 pass, smoke 55 pass), `node src/index.ts audit`(SAFE: 57 pass), `node src/index.ts release-evidence`(READY, completion은 live/competitor proof 부족으로 UNPROVEN), `npm pack --dry-run --json`(96 files), `git diff --check`, `node src/index.ts release-evidence --strict --live --probe-all-providers`(exit 1, BLOCKED/UNPROVEN; provider login/Claude CLI/connector token proof 부족)을 확인했다.
+
+## 2026-05-29 41단계: Generic inbound Webhook HMAC replay guard
+
+- Generic inbound Webhook은 기존 shared token만으로도 dashboard route와 분리되어 있었지만, token이 재사용되거나 중간 시스템 로그에 남는 경우 replay 위험을 더 줄일 수 있는 선택적 서명 경계가 없었다.
+- `connectors.webhook.inboundSignatureSecretEnv`, `inboundSignatureSecret`, `inboundSignatureToleranceMs`를 추가하고 기본 env 이름을 `VISER_WEBHOOK_INBOUND_SIGNATURE_SECRET`, 허용 오차를 300000ms로 설정했다.
+- `src/connectors/web-dashboard.ts`의 `/webhook/viser` 처리에서 shared token 확인 후 raw JSON body를 읽고, 서명 secret이 설정된 경우 `x-viser-webhook-timestamp`와 `x-viser-webhook-signature: sha256=<hex>`를 검증하도록 했다. 서명 대상은 `<timestamp>.<raw-json-body>`이며 timestamp가 허용 오차 밖이면 403으로 거부한다.
+- `env-check`, config validation, audit, example config, `.env.example`, README/SECURITY/PRIVACY 문서를 HMAC secret에 맞게 갱신했다.
+- Local smoke의 `webhook-inbound` 단계가 token 누락과 HMAC 누락을 모두 거부한 뒤 signed body만 AssistantRuntime으로 전달하는 경로를 검증하게 했다.
+- `test/web-dashboard.test.ts`에 서명 누락 403과 올바른 HMAC 200 회귀 테스트를 추가했다.
+
+Verification:
+- `npm run typecheck -- --pretty false` 통과.
+- `npm test` 통과: 533 pass, 0 fail. HMAC missing/valid signature regression과 inbound Webhook smoke가 함께 실행됐다.
+- `node src/index.ts verify --strict` 통과: readiness READY(45 pass), audit SAFE(57 pass), local smoke PASS(57 pass).
+- `node src/index.ts audit` 통과: SAFE(57 pass, 0 warn, 0 fail).
+- `node src/index.ts release-evidence` 통과: READY, local smoke 57 pass, completion은 live/competitor proof 부족으로 UNPROVEN 유지.
+- `node src/index.ts release-evidence --strict --live --probe-all-providers`는 예상대로 exit 1/UNPROVEN: codex/gpt/gemini local CLI probe는 통과했지만 Claude CLI와 다수 connector token/live proof가 현재 환경에서 미충족이다.
+- `npm pack --dry-run --json` 통과: 96 entries.
+- `git diff --check` 통과.
+
+## 2026-05-29 42단계: Guarded web-search 도구와 MCP surface 보강
+
+- OpenClaw의 `web_search` gap을 줄이기 위해 key-free DuckDuckGo HTML 기반 `web-search <query> [maxResults]`를 `/tool` surface에 추가했다.
+- 이 tool은 provider hidden tool이 아니라 explicit read-only tool이며, JavaScript를 실행하지 않고 title/url/snippet만 추출한다. DuckDuckGo redirect URL은 원본 URL로 정규화하고, credentials, `javascript:`, fragment-only, localhost/private/internal hostname·IP는 결과에서 제거한다.
+- `tools.webSearch` config를 추가해 `enabled`, `provider`, `maxResults`, `maxResponseBytes`, `timeoutMs`, `userAgent`를 검증 가능하게 했고 provider는 현재 `duckduckgo-html`만 허용한다.
+- MCP client에서도 같은 경계를 쓰도록 `viser_web_search` read-only tool을 추가했고, provider 호출이나 `/approve` 실행 없이 guarded readable search result만 반환하도록 했다.
+- Local smoke와 release evidence objective matrix를 갱신해 CLI/MCP web search가 provider 호출 없이 동작한다는 증거를 남긴다. 실제 browser automation 수준의 JS/login page handling, Claude CLI proof, connector live token proof, Hermes/OpenClaw same-host benchmark artifact는 여전히 외부 증거가 필요하므로 completion audit은 UNPROVEN으로 유지한다.
+
+Verification:
+- `npm run typecheck -- --pretty false` 통과.
+- Focused `node --test test/tools.test.ts test/mcp-server.test.ts test/smoke.test.ts test/release-evidence.test.ts test/config-validation.test.ts` 통과: 55 pass, 0 fail.
+- `npm test` 통과: 533 pass, 0 fail.
+- `node src/index.ts verify --strict` 통과: readiness READY(45 pass), audit SAFE(57 pass), local smoke PASS(57 pass).
+- `node src/index.ts audit` 통과: SAFE(57 pass, 0 warn, 0 fail).
+- `node src/index.ts release-evidence` 통과: READY, local smoke 57 pass, completion은 live/competitor proof 부족으로 UNPROVEN 유지.
+- `node src/index.ts release-evidence --strict --live --probe-all-providers`는 예상대로 exit 1/UNPROVEN: codex/gpt/gemini local CLI probe는 통과했고 Discord token은 accepted이나, Claude CLI와 다수 connector token/live proof가 현재 환경에서 미충족이다.
+- `npm pack --dry-run --json` 통과: 96 entries.
+- `git diff --check` 통과.
+
+## 2026-05-29 43단계: Verification gate 안정화와 readable web text 정리
+
+- Full-suite 검증 중 `web-search`/`mcp-web-search` smoke가 HTML `<script>` body를 readable snippet에 포함할 수 있는 경로를 드러냈다.
+- `src/core/tools.ts`에 `stripUnsafeHtml()` 공통 helper를 두고 `htmlFragmentToText()`와 `extractReadableWebText()`가 script/style/noscript/comment를 먼저 제거한 뒤 text를 추출하게 했다. `web-search`와 `web-fetch`가 서로 다른 HTML 정리 로직을 갖지 않도록 중복을 줄였다.
+- `verify`는 독립적인 `readiness`와 `audit`를 `Promise.all`로 병렬 실행해 foreground/preflight gate의 wall-clock time을 줄였다. 단, `localSmoke`는 내부에서 `globalThis.fetch` mock을 쓰므로 live connector proof와 충돌하지 않게 뒤에서 순차 실행하도록 유지했다.
+- `test/tools.test.ts`의 file-search symlink fixture는 allowed root 내부 real directory가 아니라 실제 outside temp directory를 symlink target으로 쓰도록 정리해 회귀 테스트 의도와 보안 경계를 일치시켰다.
+- Live provider/connector token proof와 Hermes/OpenClaw same-host benchmark proof는 여전히 외부 환경 증거가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+
+Verification:
+- `npm run typecheck -- --pretty false` 통과.
+- Focused `node --test test/tools.test.ts test/web-dashboard.test.ts test/smoke.test.ts test/release-evidence.test.ts test/config-validation.test.ts test/env.test.ts test/audit.test.ts` 통과: 100 pass, 0 fail.
+- `node --test test/gateway-cli.test.ts` 통과: 22 pass, 0 fail.
+- `npm test` 통과: 533 pass, 0 fail.
+- `node src/index.ts verify --strict` 통과: readiness READY(45 pass), audit SAFE(57 pass), local smoke PASS(57 pass), gateway strict gate pass.
+- `node src/index.ts audit` 통과: SAFE(57 pass, 0 warn, 0 fail).
+- `node src/index.ts release-evidence` 통과: READY, local smoke 57 pass, completion은 live provider/connector/competitor proof 부족으로 UNPROVEN 유지.
+- `npm pack --dry-run --json` 통과: 96 entries.
+- `git diff --check` 통과.
+- 추가 live proof 확인: sandbox 안의 `node src/index.ts release-evidence --strict --live --probe-all-providers`는 Codex permission/network 제약으로 BLOCKED/exit 1이었다. sandbox 밖 재실행은 release evidence READY, verify PASS, readiness READY WITH WARNINGS(73 pass, 1 warn, 0 fail), audit SAFE, local smoke PASS였고 Codex/GPT/Gemini local CLI probe와 Discord live token은 통과했다. 다만 Claude CLI가 설치되어 있지 않고 대부분 connector token·browser live UX·Hermes/OpenClaw benchmark proof가 없어서 strict completion은 계속 UNPROVEN/exit 1이다.
+
+## 2026-05-30 44단계: Cached markdown web-fetch와 Synology Chat connector 증거 보강
+
+- OpenClaw web-fetch parity gap을 줄이기 위해 `/tool web-fetch`와 MCP `viser_web_fetch`에 text/markdown extract mode와 foreground in-memory cache TTL을 추가했다.
+- cache는 URL+extract mode별 in-memory only, short TTL, no disk persistence이며 SSRF/DNS/redirect cap과 script/style/noscript/comment stripping 경계는 유지했다.
+- Markdown extraction은 heading/list/link/paragraph 정도만 readable form으로 보존하고, credential URL·localhost/private/internal hostname·IP link는 결과에서 제외한다.
+- 현재 worktree에 부분 반영되어 있던 Synology Chat outbound connector를 config/env/readiness/audit/doctor/notifier/actions/access/docs/smoke/release-evidence/test까지 연결했다.
+- Synology Chat webhook은 `api=SYNO.Chat.External`, `method=incoming`, token query를 요구하고, approval-gated alias target만 받으며 webhook URL/token/body/alias를 error/detail에서 redacted한다.
+- Live Synology Chat webhook proof, Claude CLI proof, 다수 connector token proof, browser live UX proof, Hermes/OpenClaw same-host benchmark artifact는 외부 증거가 필요하므로 completion audit은 UNPROVEN 유지한다.
+
+Verification:
+- `npm run typecheck -- --pretty false` 통과.
+- Focused `node --test test/tools.test.ts test/mcp-server.test.ts test/smoke.test.ts test/release-evidence.test.ts test/config-validation.test.ts test/connectors.test.ts test/validate.test.ts test/actions.test.ts test/access.test.ts test/connector-access.test.ts` 통과: 184 pass, 0 fail.
+- `npm test` 통과: 534 pass, 0 fail.
+- `node src/index.ts verify --strict` 통과: readiness READY(46 pass), audit SAFE(58 pass), local smoke PASS(58 pass).
+- `node src/index.ts audit` 통과: SAFE(58 pass, 0 warn, 0 fail).
+- `node src/index.ts release-evidence` 통과: READY, local smoke 58 pass, completion은 live provider/connector/competitor proof 부족으로 UNPROVEN 유지.
+- `node src/index.ts release-evidence --strict --live --probe-all-providers`는 예상대로 exit 1/UNPROVEN: readiness READY WITH WARNINGS(75 pass, 1 warn), audit SAFE(58 pass), local smoke PASS(58 pass), Codex/GPT/Gemini local CLI probe와 Discord live token은 통과했지만 Claude CLI, Synology Chat 포함 대부분 connector token, live browser UX, real-provider skill-learning, Hermes/OpenClaw benchmark proof가 미충족이다.
+- `npm pack --dry-run --json` 통과: 97 entries, `src/connectors/synology-chat.ts` 포함.
+- `git diff --check` 통과.
+
+## 2026-05-30 44단계: Synology Chat outbound connector로 OpenClaw channel breadth gap 축소
+
+- OpenClaw의 공개 기능 문서가 Synology Chat을 bundled channel surface로 나열하고 있어, Viser의 first-class connector breadth에서 빠져 있던 Synology Chat을 승인 기반 outbound sender로 추가했다.
+- `src/connectors/synology-chat.ts`는 `SYNOLOGY_CHAT_WEBHOOK_URL`/`SYNOLOGY_CHAT_WEBHOOKS`에서 alias 기반 webhook만 해석하고, raw action/scheduler state에는 webhook token URL을 저장하지 않는다.
+- Synology Chat URL은 `https://.../webapi/entry.cgi?api=SYNO.Chat.External&method=incoming&...&token=...` 형태만 허용하고 URL credential, 비-HTTPS, 누락된 `api`/`method`/`token` query를 거부한다.
+- 전송 payload는 Synology incoming webhook 요구 형식에 맞춰 `application/x-www-form-urlencoded`의 `payload={"text":"..."}` form body로 보낸다. 실패 detail에서는 webhook URL/token, alias, message body를 redaction한다.
+- config/env/readiness/audit/next-steps/doctor/verify/release-evidence/smoke/MCP/CLI help/action validation/scheduler delivery/dashboard 상태를 모두 `synology-chat` connector에 맞게 연결했다.
+- Local smoke의 `mcp-web-fetch`는 기존 `web-fetch` smoke와 같은 URL을 써서 in-memory cache hit가 섞일 수 있었기 때문에 별도 `/mcp-smoke` URL로 분리해 MCP markdown fetch가 독립 fetch 결과를 검증하게 했다.
+- README, `.env.example`, `config/viser.config.example.json`, package keyword, release evidence 문서를 Synology Chat 설정과 승인 경로에 맞게 갱신했다.
+- 남은 parity gap은 실제 Synology Chat webhook token live proof, 기타 platform-specific chat surface, Claude CLI live proof, live browser UX proof, Hermes/OpenClaw same-host benchmark artifact다. 따라서 completion audit은 계속 UNPROVEN으로 유지한다.
+
+Verification:
+- `npm run typecheck -- --pretty false` 통과.
+- Focused `node --test test/connectors.test.ts test/validate.test.ts test/actions.test.ts test/access.test.ts test/connector-access.test.ts test/readiness.test.ts test/next-steps.test.ts test/release-evidence.test.ts test/smoke.test.ts test/audit.test.ts test/config-validation.test.ts test/env.test.ts test/state-health.test.ts test/backup.test.ts` 통과: 269 pass, 0 fail.
+- `npm test` 통과: 534 pass, 0 fail.
+- `node src/index.ts verify --strict` 통과: readiness READY(46 pass), audit SAFE(58 pass), local smoke PASS(58 pass), gateway strict gate pass.
+- `node src/index.ts release-evidence` 통과: READY, local smoke 58 pass, completion은 live/competitor proof 부족으로 UNPROVEN 유지.
+- `node src/index.ts release-evidence --strict --live --probe-all-providers`는 예상대로 exit 1/UNPROVEN: Codex/GPT/Gemini local CLI probe와 Discord live token은 통과했지만 Claude CLI command가 없고 Telegram/Slack/Matrix/Signal/iMessage/WhatsApp/LINE/Google Chat/generic Webhook/Home Assistant/Teams/Mattermost/Synology Chat/Rocket.Chat/Feishu/DingTalk/WeCom/Zalo/IRC/Twitch/Nextcloud Talk/Webex/Zulip/Email token/live proof가 대부분 disabled다.
+- `npm pack --dry-run --json` 통과: 97 entries.
+- `git diff --check` 통과.
+
+## 2026-05-30 45단계: SearXNG web-search provider와 GitHub 증거 정합화
+
+- OpenClaw의 공개 기능 문서가 여러 web search provider를 지원한다고 설명하므로, 기존 `duckduckgo-html` 단일 경로에 더해 self-hostable/key-free `searxng-html` provider를 `tools.webSearch.provider`에 추가했다.
+- `tools.webSearch.searxngBaseUrl`은 `https://` URL, hostname, credential 금지 조건으로 검증하고, SearXNG HTML `/search?q=...&format=html` 결과에서 title/url/snippet만 추출한다.
+- SearXNG parsing도 DuckDuckGo 경로와 같은 readable HTML sanitizer, result URL normalization, provider-host self-link 제거, 내부/credential URL 차단 경계를 공유한다.
+- Release evidence와 local smoke가 `web-search-searxng` smoke item을 요구하도록 갱신해 SearXNG provider support가 문서상 claim이 아니라 회귀 증거로 남게 했다.
+- 이전 작업으로 추가된 GitHub issue/PR comment connector가 release evidence, next-steps, README, MCP tool description, verify recommended command, live-redaction test에 일관되게 반영되지 않은 부분을 정리했다.
+- GitHub live proof redaction fixture는 `GITHUB_TOKEN`/`GITHUB_ISSUE_TARGET`을 설정하고 mocked `https://api.github.com/user` 응답을 통과시켜, safe-to-paste proof에서 username/token/repo/issue number가 새지 않는 것을 검증한다.
+- 남은 parity gap은 실제 connector live tokens, Claude CLI 설치/login proof, browser permission UX proof, real-provider skill-learning proof, Hermes/OpenClaw same-host benchmark artifact다. 따라서 completion audit은 계속 UNPROVEN으로 유지한다.
+
+Verification:
+- `npm run typecheck -- --pretty false` 통과.
+- Focused `node --test test/release-evidence.test.ts test/next-steps.test.ts test/smoke.test.ts test/verify.test.ts test/mcp-server.test.ts` 통과: 36 pass, 0 fail.
+- `npm test` 통과: 540 pass, 0 fail.
+- `node src/index.ts verify --strict` 통과: readiness READY(47 pass), audit SAFE(59 pass), local smoke PASS(60 pass), gateway strict gate pass.
+- `node src/index.ts release-evidence` 통과: READY, local smoke 60 pass, completion은 live/competitor proof 부족으로 UNPROVEN 유지.
+- `node src/index.ts release-evidence --strict --live --probe-all-providers`는 예상대로 exit 1/UNPROVEN: Codex/GPT/Gemini local CLI probe와 Discord live token은 통과했지만 Claude CLI command가 없고 GitHub 포함 대부분 connector token/live proof가 disabled다.
+- `npm pack --dry-run --json` 통과: 98 entries, `src/connectors/github.ts`와 SearXNG-enabled tool surface 포함.
+- `git diff --check` 통과.
+
+## 2026-05-30 46단계: GitHub issue/PR comment connector 완성 및 release-evidence proof 편입
+
+- OpenClaw/Hermes 대비 productivity/channel breadth gap을 줄이기 위해 GitHub issue/PR conversation comment outbound connector를 완성했다.
+- `src/connectors/github.ts`는 `GITHUB_TOKEN`, `GITHUB_ISSUE_TARGET`, `GITHUB_ISSUE_TARGETS`를 사용해 `owner/repo#123` 또는 GitHub issue/PR URL을 normalized target으로 해석하고, approval-gated `github:<alias>` 경로에서만 전송한다.
+- GitHub token, owner/repo/issue target, alias, message body, API error detail은 connector/validate/readiness/release-evidence 경로에서 redacted한다.
+- config/env/readiness/audit/doctor/next-steps/verify/release-evidence/smoke/MCP/CLI help/action validation/scheduler delivery/dashboard status/docs/package metadata에 `github` connector를 연결했다.
+- Local smoke와 release evidence objective matrix가 direct GitHub comment sender와 approval-gated outbound message path를 증거로 포함한다.
+- Verification 중 빠르게 종료되는 provider probe command가 stdin을 읽기 전에 닫히며 `EPIPE`를 낼 수 있음을 확인해, `runCommand`가 benign stdin close를 process result로 처리하도록 보강하고 회귀 테스트를 추가했다.
+- 실제 GitHub token/live issue comment proof, Claude CLI 설치/login proof, 기타 connector live tokens, browser permission UX proof, real-provider skill-learning proof, Hermes/OpenClaw same-host benchmark artifact는 외부 환경 proof가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+
+Verification:
+- `npm run typecheck -- --pretty false` 통과.
+- Focused `node --test test/connectors.test.ts test/validate.test.ts test/actions.test.ts test/access.test.ts test/connector-access.test.ts test/smoke.test.ts test/release-evidence.test.ts test/config-validation.test.ts test/mcp-server.test.ts test/readiness.test.ts test/audit.test.ts test/next-steps.test.ts test/state-health.test.ts test/exec.test.ts` 통과: 250 pass, 0 fail.
+- `node --test test/exec.test.ts test/release-evidence.test.ts` 통과: 16 pass, 0 fail.
+- `npm test` 통과: 540 pass, 0 fail.
+- `node src/index.ts verify --strict` 통과: readiness READY(47 pass), audit SAFE(59 pass), local smoke PASS(60 pass), gateway strict gate pass.
+- `node src/index.ts audit` 통과: SAFE(59 pass, 0 warn, 0 fail).
+- `node src/index.ts release-evidence` 통과: READY, local smoke 60 pass, completion은 live/competitor proof 부족으로 UNPROVEN 유지.
+- `node src/index.ts release-evidence --strict --live --probe-all-providers`는 예상대로 exit 1/UNPROVEN: readiness READY WITH WARNINGS(77 pass, 1 warn), audit SAFE(59 pass), local smoke PASS(60 pass), Codex/GPT/Gemini local CLI probe와 Discord live token은 통과했지만 Claude CLI command가 없고 GitHub 포함 대부분 connector token/live proof가 disabled다.
+- `npm pack --dry-run --json` 통과: 98 entries, `src/connectors/github.ts` 포함.
+- `git diff --check` 통과.
+
+## 2026-05-30 47단계: Brave Search API provider로 web-search breadth gap 축소
+
+- OpenClaw/Hermes 대비 web search provider breadth gap을 줄이기 위해 `tools.webSearch.provider`에 `brave-api`를 추가했다.
+- Brave Search API key는 model API key가 아니라 search transport credential로 분리했고, 기본 env는 `BRAVE_SEARCH_API_KEY`다. literal `tools.webSearch.braveApiKey`도 타입상 허용하지만 audit와 docs는 env 사용을 권장하고 public config에 직접 저장된 key를 실패로 처리한다.
+- `web-search` tool은 Brave 경로에서 `https://api.search.brave.com/res/v1/web/search`만 호출하고, `x-subscription-token` header로 key를 전달하며, JSON `web.results[]`의 title/url/description만 bounded readable result로 변환한다.
+- DuckDuckGo/SearXNG와 같은 URL sanitizer를 공유해 credential URL, `javascript:`, localhost/private/internal hostname·IP, script/style/noscript/comment HTML이 결과에 섞이지 않도록 했다.
+- Config validation, env-check/env-init, public example config, audit, backup redaction, MCP tool description, README/SECURITY docs, smoke/release-evidence objective matrix를 Brave provider support에 맞게 갱신했다.
+- Local smoke와 unit tests는 mocked Brave endpoint/header/result parsing을 검증하며, release evidence의 `web-search-brave` item이 provider support를 회귀 증거로 고정한다.
+- 실제 Brave API key live proof, Claude CLI 설치/login proof, connector token live proof, browser permission UX proof, real-provider skill-learning proof, Hermes/OpenClaw same-host benchmark artifact는 외부 환경 proof가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+
+Verification:
+- `npm run typecheck -- --pretty false` 통과.
+- Focused `node --test test/tools.test.ts test/config-validation.test.ts test/smoke.test.ts test/release-evidence.test.ts test/audit.test.ts test/backup.test.ts test/env.test.ts` 통과: 114 pass, 0 fail.
+- `npm test` 통과: 547 pass, 0 fail.
+- `git diff --check` 통과.
+- `node src/index.ts verify --strict` 통과: readiness READY(48 pass), audit SAFE(60 pass), local smoke PASS(62 pass), gateway strict gate pass.
+- `node src/index.ts release-evidence` 통과: READY, local smoke 62 pass, completion은 live/competitor proof 부족으로 UNPROVEN 유지.
+- `npm pack --dry-run --json` 통과: 99 entries, Brave-enabled web-search surface 포함.
+
+## 2026-05-30 48단계: Notion page append connector로 workspace automation parity 보강
+
+- Hermes/OpenClaw 대비 productivity/workspace automation gap을 줄이기 위해 Notion page append outbound connector를 추가했다.
+- `src/connectors/notion.ts`는 Notion API의 block children append endpoint로 paragraph block을 추가하고, `NOTION_TOKEN`, `NOTION_PAGE_ID`, `NOTION_PAGES`를 통해 page alias를 해석한다.
+- Action/scheduler/MCP 경로는 raw page URL이나 token이 아니라 approval-gated `notion:<alias>`만 받도록 묶어 두었고, page ID/alias/message body/token은 connector, validation, readiness, release-evidence error detail에서 redacted한다.
+- Notion URL parser는 `https://notion.so`, `https://*.notion.so`, `https://notion.site`, `https://*.notion.site` host만 허용하고, `evilnotion.so` 같은 suffix 혼동을 거부하도록 hardened했다.
+- config/env/readiness/audit/doctor/next-steps/verify/release-evidence/smoke/MCP/CLI help/action validation/scheduler delivery/dashboard status/docs/package metadata에 `notion` connector를 연결했다.
+- Local smoke와 release evidence objective matrix가 direct Notion append sender와 approval-gated outbound message path를 증거로 포함한다.
+- 실제 Notion token/live page append proof, Claude CLI 설치/login proof, 대부분 connector live tokens, browser permission UX proof, real-provider skill-learning proof, Hermes/OpenClaw same-host benchmark artifact는 외부 환경 proof가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+
+Verification:
+- `npm run typecheck -- --pretty false` 통과.
+- Focused `node --test test/connectors.test.ts test/validate.test.ts test/actions.test.ts test/access.test.ts test/connector-access.test.ts test/smoke.test.ts test/release-evidence.test.ts test/config-validation.test.ts test/mcp-server.test.ts test/readiness.test.ts test/audit.test.ts test/next-steps.test.ts test/state-health.test.ts` 통과: 249 pass, 0 fail.
+- `npm test` 통과: 547 pass, 0 fail.
+- `node src/index.ts verify --strict` 통과: readiness READY(48 pass), audit SAFE(60 pass), local smoke PASS(62 pass), gateway strict gate pass.
+- `node src/index.ts audit` 통과: SAFE(60 pass, 0 warn, 0 fail).
+- `node src/index.ts release-evidence` 통과: READY, local smoke 62 pass, completion은 live/competitor proof 부족으로 UNPROVEN 유지.
+- `node src/index.ts release-evidence --strict --live --probe-all-providers`는 예상대로 exit 1/UNPROVEN: readiness READY WITH WARNINGS(79 pass, 1 warn), audit SAFE(60 pass), local smoke PASS(62 pass), Codex/GPT/Gemini local CLI probe와 Discord live token은 통과했지만 Claude CLI command가 없고 Notion 포함 대부분 connector token/live proof가 disabled다.
+- `npm pack --dry-run --json` 통과: 99 entries, `src/connectors/notion.ts` 포함.
+- `git diff --check` 통과.
+
+## 2026-05-30 48단계: Tavily Search API provider로 web-search provider breadth 추가 축소
+
+- OpenClaw가 여러 web search provider를 지원하는 gap을 더 줄이기 위해 `tools.webSearch.provider`에 `tavily-api`를 추가했다.
+- Tavily Search API key도 Brave와 동일하게 model API key가 아니라 search transport credential로 분리했고, 기본 env는 `TAVILY_API_KEY`다. `viser.config.json`에 literal `tools.webSearch.tavilyApiKey`를 저장하면 audit가 실패하도록 했다.
+- `/tool web-search`는 Tavily 경로에서 `POST https://api.tavily.com/search`만 호출하고, `Authorization: Bearer ...` header와 bounded JSON body(`query`, `max_results`, `search_depth=basic`, raw content/answer 비활성)를 사용한다.
+- Tavily response의 `results[]`에서 title/url/content만 읽고, DuckDuckGo/SearXNG/Brave와 같은 sanitizer를 공유해 credential URL, `javascript:`, localhost/private/internal hostname·IP, script/style/noscript/comment HTML이 출력에 섞이지 않도록 했다.
+- Config validation, env-check/env-init, public example config, audit, backup redaction, MCP tool description, README/SECURITY docs, smoke/release-evidence objective matrix를 Tavily provider support에 맞게 갱신했다.
+- Local smoke와 unit tests는 mocked Tavily endpoint, Bearer header, JSON body, result parsing, private URL filtering을 검증한다.
+- 실제 Tavily API key live proof, Claude CLI 설치/login proof, connector token live proof, browser permission UX proof, real-provider skill-learning proof, Hermes/OpenClaw same-host benchmark artifact는 외부 환경 proof가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+
+Verification:
+- `npm run typecheck -- --pretty false` 통과.
+- Focused `node --test test/tools.test.ts test/config-validation.test.ts test/smoke.test.ts test/release-evidence.test.ts test/audit.test.ts test/backup.test.ts test/env.test.ts` 통과: 118 pass, 0 fail.
+- `npm test` 통과: 551 pass, 0 fail.
+- `git diff --check` 통과.
+- `node src/index.ts verify --strict` 통과: readiness READY(48 pass), audit SAFE(60 pass), local smoke PASS(63 pass), gateway strict gate pass.
+- `node src/index.ts release-evidence` 통과: READY, local smoke 63 pass, completion은 live/competitor proof 부족으로 UNPROVEN 유지.
+- `npm pack --dry-run --json` 통과: 100 entries, Tavily-enabled web-search surface 포함.
+- `node src/index.ts release-evidence --strict --live --probe-all-providers`는 예상대로 exit 1/UNPROVEN: Codex/GPT/Gemini local CLI probe와 Discord live token은 통과했지만 Claude CLI command가 없고 대부분 connector token, live browser UX, real-provider skill-learning, Hermes/OpenClaw benchmark proof가 미충족이다.
+
+## 2026-05-30 49단계: Perplexity Search API provider로 web-search provider breadth 추가 축소
+
+- OpenClaw가 Perplexity를 web search provider로 제공하는 gap을 줄이기 위해 `tools.webSearch.provider`에 `perplexity-api`를 추가했다.
+- Perplexity Search API key는 model API key가 아니라 search transport credential로 분리했고, 기본 env는 `PERPLEXITY_API_KEY`다. `viser.config.json`에 literal `tools.webSearch.perplexityApiKey`를 저장하면 audit가 실패하도록 했다.
+- `/tool web-search`는 Perplexity 경로에서 `POST https://api.perplexity.ai/search`만 호출하고, `Authorization: Bearer ...` header와 bounded JSON body(`query`, `max_results`, `max_tokens`, `max_tokens_per_page`)를 사용한다.
+- Perplexity response의 `results[]`에서 title/url/snippet만 읽고, DuckDuckGo/SearXNG/Brave/Tavily와 같은 sanitizer를 공유해 credential URL, `javascript:`, localhost/private/internal hostname·IP, script/style/noscript/comment HTML이 출력에 섞이지 않도록 했다.
+- Config validation, env-check/env-init, public example config, audit, backup redaction, MCP tool description, README/SECURITY docs, smoke/release-evidence objective matrix를 Perplexity provider support에 맞게 갱신했다.
+- Typecheck 중 기존 Obsidian connector 추가분이 일부 test config helper에 누락된 것을 발견해, 누락 helper에 disabled Obsidian defaults를 채웠고 release evidence live-redaction fixture도 Obsidian까지 반영했다.
+- Backup content redaction은 Obsidian config의 `note`/`notes`를 config sanitizer에서 계속 redaction하되, storage file 안의 일반 JSON `note` 필드는 과잉 redaction하지 않도록 좁혔다.
+- 실제 Perplexity API key live proof, Claude CLI 설치/login proof, connector token live proof, browser permission UX proof, real-provider skill-learning proof, Hermes/OpenClaw same-host benchmark artifact는 외부 환경 proof가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+
+Verification:
+- `npm run typecheck -- --pretty false` 통과.
+- Focused `node --test test/backup.test.ts test/release-evidence.test.ts` 통과: 28 pass, 0 fail.
+- Focused `node --test test/tools.test.ts test/config-validation.test.ts test/smoke.test.ts test/release-evidence.test.ts test/audit.test.ts test/backup.test.ts test/env.test.ts` 통과: 122 pass, 0 fail.
+- `npm test` 통과: 556 pass, 0 fail.
+- `git diff --check` 통과.
+- `node src/index.ts verify --strict` 통과: readiness READY(49 pass), audit SAFE(61 pass), local smoke PASS(65 pass), gateway strict gate pass.
+- `node src/index.ts release-evidence` 통과: READY, local smoke 65 pass, completion은 live/competitor proof 부족으로 UNPROVEN 유지.
+- `npm pack --dry-run --json` 통과: 100 entries, Perplexity-enabled web-search surface 포함.
+- `node src/index.ts release-evidence --strict --live --probe-all-providers`는 예상대로 exit 1/UNPROVEN: Codex/GPT/Gemini local CLI probe와 Discord live token은 통과했지만 Claude CLI command가 없고 대부분 connector token, Obsidian local target, live browser UX, real-provider skill-learning, Hermes/OpenClaw benchmark proof가 미충족이다.
+
+## 2026-05-30 50단계: Obsidian local Markdown vault connector로 workspace append parity 보강
+
+- Hermes/OpenClaw 대비 personal workspace automation gap을 줄이기 위해 Obsidian/local Markdown vault append outbound connector를 first-class connector로 추가했다.
+- `src/connectors/obsidian.ts`는 `OBSIDIAN_VAULT_DIR`, `OBSIDIAN_NOTE`, `OBSIDIAN_NOTES`로 vault와 note alias를 해석하고, approval-gated `obsidian:<alias>` 경로에서만 Markdown block을 append한다.
+- Obsidian note target은 alias 기반 `.md` relative path만 허용하며 path traversal, absolute path, hidden/private path segment, backslash, control character, non-Markdown extension, symlinked vault/root/path component를 거부한다.
+- Append는 vault root가 실제 directory일 때만 진행하고 `O_NOFOLLOW`/private append helper를 사용해 symlink overwrite나 vault 밖 write를 막는다.
+- Vault path, note path, alias, absolute path, message body는 connector, validation, readiness, release-evidence, backup redaction 경로에서 safe-to-paste가 되도록 redacted한다.
+- config/env/readiness/audit/doctor/next-steps/verify/release-evidence/smoke/MCP/CLI help/action validation/scheduler delivery/dashboard status/docs/package metadata에 `obsidian` connector를 연결했다.
+- Local smoke와 release evidence objective matrix가 direct Obsidian note append와 approval-gated outbound message path를 증거로 포함한다.
+- 실제 사용자 Obsidian vault target proof, Claude CLI 설치/login proof, 대부분 connector live tokens, browser permission UX proof, real-provider skill-learning proof, Hermes/OpenClaw same-host benchmark artifact는 외부/로컬 사용자 환경 proof가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+
+Verification:
+- `npm run typecheck -- --pretty false` 통과.
+- Focused `node --test test/connectors.test.ts test/validate.test.ts test/actions.test.ts test/access.test.ts test/connector-access.test.ts test/smoke.test.ts test/release-evidence.test.ts test/config-validation.test.ts test/mcp-server.test.ts test/readiness.test.ts test/audit.test.ts test/next-steps.test.ts test/state-health.test.ts test/backup.test.ts test/env.test.ts test/verify.test.ts` 통과: 301 pass, 0 fail.
+- `npm test` 통과: 556 pass, 0 fail.
+- `git diff --check` 통과.
+- `node src/index.ts audit` 통과: SAFE(61 pass, 0 warn, 0 fail).
+- `node src/index.ts verify --strict` 통과: readiness READY(49 pass), audit SAFE(61 pass), local smoke PASS(65 pass), gateway strict gate pass.
+- `node src/index.ts release-evidence` 통과: READY, local smoke 65 pass, completion은 live/competitor proof 부족으로 UNPROVEN 유지.
+- `npm pack --dry-run --json` 통과: 100 entries, `src/connectors/obsidian.ts` 포함.
+- `node src/index.ts release-evidence --strict --live --probe-all-providers`는 예상대로 exit 1/UNPROVEN: readiness READY WITH WARNINGS(81 pass, 1 warn), audit SAFE(61 pass), local smoke PASS(65 pass), Codex/GPT/Gemini local CLI probe와 Discord live token은 통과했지만 Claude CLI command가 없고 Obsidian 포함 대부분 connector token/target, live browser UX, real-provider skill-learning, Hermes/OpenClaw benchmark proof가 미충족이다.
+
+## 2026-05-30 51단계: Exa Search API provider로 web-search provider breadth 추가 축소
+
+- OpenClaw/Hermes 대비 web search provider breadth gap을 더 줄이기 위해 `tools.webSearch.provider`에 `exa-api`를 추가했다.
+- Exa Search API key는 model API key가 아니라 search transport credential로 분리했고, 기본 env는 `EXA_API_KEY`다. `viser.config.json`에 literal `tools.webSearch.exaApiKey`를 저장하면 audit가 실패하도록 했다.
+- `/tool web-search`는 Exa 경로에서 `POST https://api.exa.ai/search`만 호출하고, `x-api-key` header와 bounded JSON body(`query`, `numResults`, `contents.highlights=true`)를 사용한다.
+- Exa response의 `results[]`에서 title/url/highlights/summary/text만 읽고, DuckDuckGo/SearXNG/Brave/Tavily/Perplexity와 같은 sanitizer를 공유해 credential URL, `javascript:`, localhost/private/internal hostname·IP, script/style/noscript/comment HTML이 출력에 섞이지 않도록 했다.
+- Config validation, env-check/env-init, public example config, audit, backup redaction, MCP tool description, README/SECURITY docs, smoke/release-evidence objective matrix를 Exa provider support에 맞게 갱신했다.
+- Local smoke와 unit tests는 mocked Exa endpoint, `x-api-key` header, `numResults`/`contents.highlights` body, result parsing, private URL filtering을 검증한다.
+- 기존 Todoist connector 추가분이 일부 test config helper와 release/next-steps fixture에 누락되어 typecheck/full test를 막고 있었으므로, disabled Todoist defaults 및 safe-to-paste live-redaction/next-steps expectations를 맞춰 현재 전체 검증이 다시 통과하도록 했다.
+- 실제 Exa API key live proof, Claude CLI 설치/login proof, 대부분 connector token/live proof, browser permission UX proof, real-provider skill-learning proof, Hermes/OpenClaw same-host benchmark artifact는 외부 환경 proof가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+
+Verification:
+- `npm run typecheck -- --pretty false` 통과.
+- Focused `node --test test/tools.test.ts test/config-validation.test.ts test/smoke.test.ts test/release-evidence.test.ts test/audit.test.ts test/backup.test.ts test/env.test.ts` 통과: 126 pass, 0 fail.
+- Focused `node --test test/next-steps.test.ts` 통과: 9 pass, 0 fail.
+- Focused `node --test test/release-evidence.test.ts test/smoke.test.ts` 통과: 12 pass, 0 fail.
+- `npm test` 통과: 560 pass, 0 fail.
+- `git diff --check` 통과.
+- `node src/index.ts verify --strict` 통과: readiness READY(50 pass), audit SAFE(62 pass), local smoke PASS(67 pass), gateway strict gate pass.
+- `node src/index.ts release-evidence` 통과: READY, local smoke 67 pass, completion은 live/competitor proof 부족으로 UNPROVEN 유지.
+- `npm pack --dry-run --json` 통과: 101 entries, Exa-enabled web-search surface 포함.
+- `node src/index.ts release-evidence --strict --live --probe-all-providers`는 예상대로 exit 1/UNPROVEN: readiness READY WITH WARNINGS(83 pass, 1 warn), audit SAFE(62 pass), local smoke PASS(67 pass), Codex/GPT/Gemini local CLI probe와 Discord live token은 통과했지만 Claude CLI command가 없고 대부분 connector token/target, live browser UX, real-provider skill-learning, Hermes/OpenClaw benchmark proof가 미충족이다.
+
+## 2026-05-30 52단계: Todoist task connector로 productivity automation parity 보강
+
+- Hermes/OpenClaw 대비 productivity/workspace automation gap을 줄이기 위해 Todoist task-create outbound connector를 first-class connector로 추가했다.
+- `src/connectors/todoist.ts`는 `TODOIST_API_TOKEN`, `TODOIST_PROJECT_ID`, `TODOIST_PROJECTS`로 project alias를 해석하고, `todoist:<alias>` approval-gated 경로에서만 Todoist Sync API task create command를 보낸다.
+- `todoist:inbox`는 project target 없이 inbox task를 만들고, `todoist:default`/custom alias는 configured server project ID만 사용하며 `tmp-*` placeholder와 unsafe alias를 거부한다.
+- Token, project ID, alias, task body는 connector, validation, readiness, release-evidence, docs/backup/error detail에서 safe-to-paste가 되도록 redacted한다.
+- Config/env/readiness/audit/doctor/next-steps/verify/release-evidence/smoke/MCP/CLI help/action validation/scheduler delivery/dashboard status/docs/package metadata에 `todoist` connector를 연결했다.
+- Local smoke와 release evidence objective matrix가 direct Todoist task create와 approval-gated outbound message path를 증거로 포함한다.
+- 실제 Todoist API token/live project proof, Claude CLI 설치/login proof, 대부분 connector live tokens, browser permission UX proof, real-provider skill-learning proof, Hermes/OpenClaw same-host benchmark artifact는 외부/로컬 사용자 환경 proof가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+
+Verification:
+- `npm run typecheck -- --pretty false` 통과.
+- Focused `node --test test/connectors.test.ts test/connector-access.test.ts test/actions.test.ts test/access.test.ts test/validate.test.ts test/smoke.test.ts test/release-evidence.test.ts` 통과: 151 pass, 0 fail.
+- Focused `node --test test/next-steps.test.ts` 통과: 9 pass, 0 fail.
+- `npm test` 통과: 563 pass, 0 fail.
+- `git diff --check` 통과.
+- `node src/index.ts release-evidence` 통과: READY, readiness READY(50 pass), audit SAFE(62 pass), local smoke PASS(67 pass), completion은 live/competitor proof 부족으로 UNPROVEN 유지.
+- `npm pack --dry-run --json` 통과: 101 entries, `src/connectors/todoist.ts` 포함.
+
+## 2026-05-30 53단계: Firecrawl Search API provider 증거화로 web-search breadth 고정
+
+- OpenClaw/Hermes 대비 web search provider breadth gap을 더 줄이기 위해 현재 워크트리의 `firecrawl-api` provider surface를 공식 Firecrawl v2 Search API 형식 기준으로 검증하고 release evidence에 고정했다.
+- Firecrawl 공식 문서 기준 endpoint는 `POST https://api.firecrawl.dev/v2/search`, 인증은 `Authorization: Bearer <token>`, body는 `query`/`limit`/`sources`를 받으며 응답은 `data.web[]` 결과를 포함한다.
+- Viser의 `/tool web-search` Firecrawl 경로는 provider redirect를 따르지 않고 JSON response만 수락하며, `data.web[]`의 title/url/description/markdown/metadata에서 bounded result만 추출한다.
+- DuckDuckGo/SearXNG/Brave/Tavily/Perplexity/Exa와 같은 sanitizer를 공유해 credential URL, `javascript:`, localhost/private/internal hostname·IP, script/style/noscript/comment HTML이 출력에 섞이지 않도록 했다.
+- `FIRECRAWL_API_KEY`는 model API key가 아니라 search transport credential로 분리했고, config literal 저장은 audit 대상 secret으로 유지한다.
+- Local smoke와 unit tests는 mocked Firecrawl endpoint, Bearer header, `limit`/`sources=["web"]` body, v2 `data.web[]` parsing, private URL filtering을 검증한다.
+- 실제 Firecrawl API key live proof, Claude CLI 설치/login proof, 대부분 connector live tokens/targets, browser permission UX proof, real-provider skill-learning proof, Hermes/OpenClaw same-host benchmark artifact는 외부 환경 proof가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+
+Reference:
+- Firecrawl v2 Search API docs: https://docs.firecrawl.dev/api-reference/v2-endpoint/search
+
+Verification:
+- `npm run typecheck -- --pretty false` 통과.
+- Focused `node --test test/tools.test.ts test/config-validation.test.ts test/smoke.test.ts test/release-evidence.test.ts test/audit.test.ts test/backup.test.ts test/env.test.ts` 통과: 130 pass, 0 fail.
+- `npm test` 통과: 567 pass, 0 fail.
+- `git diff --check` 통과.
+- `node src/index.ts verify --strict` 통과: readiness READY(50 pass), audit SAFE(62 pass), local smoke PASS(68 pass), gateway strict gate pass.
+- `node src/index.ts release-evidence` 통과: READY, readiness READY(50 pass), audit SAFE(62 pass), local smoke PASS(68 pass), completion은 live/competitor proof 부족으로 UNPROVEN 유지.
+- `npm pack --dry-run --json` 통과: 101 entries, Firecrawl-enabled web-search surface 포함.
+
+## 2026-05-30 52단계: Firecrawl Search API provider로 OpenClaw web-search provider breadth 추가 축소
+
+- OpenClaw web tool 문서가 Firecrawl 기반 web search/scrape provider surface를 제공하므로, Viser의 guarded `web-search` provider에 `firecrawl-api`를 추가했다.
+- `firecrawl-api`는 `POST https://api.firecrawl.dev/v2/search`에 `Authorization: Bearer <key>`를 보내고, `{ query, limit, sources:["web"], ignoreInvalidURLs:true }`만 전송한다. 결과는 `data.web[]`의 title/url/description만 추출하며 기존 result sanitizer를 그대로 재사용해 URL credential, localhost/private/internal host/IP, script content를 출력하지 않는다.
+- 새 secret 경계는 `tools.webSearch.firecrawlApiKeyEnv`(기본 `FIRECRAWL_API_KEY`) 또는 `tools.webSearch.firecrawlApiKey`이며, config validation/audit/env-check/backup redaction/.env.example/config example/package keywords/README/SECURITY/MCP description/release-evidence smoke matrix에 반영했다.
+- Simplification: 새 dependency 없이 기존 web-search provider dispatch, bounded response reader, JSON parser, snippet sanitizer, audit/env/backup secret 처리 경로를 재사용했다. Firecrawl scrape-backed `web-fetch`까지 확장하지 않고 검색 결과 snippet provider만 추가해 diff를 작게 유지했다.
+- 검증: `npm run typecheck -- --pretty false` 통과, focused `node --test test/tools.test.ts test/config-validation.test.ts test/smoke.test.ts test/release-evidence.test.ts test/audit.test.ts test/backup.test.ts test/env.test.ts` 통과(130 pass, 0 fail), `npm test` 통과(567 pass, 0 fail), `git diff --check` 통과, `node src/index.ts verify --strict` 통과(readiness READY 50 pass, audit SAFE 62 pass, local smoke PASS 68 pass), `node src/index.ts release-evidence` 통과(READY, local smoke 68 pass, completion UNPROVEN 유지), `npm pack --dry-run --json` 통과(101 entries).
+- `node src/index.ts release-evidence --strict --live --probe-all-providers`는 예상대로 exit 1/UNPROVEN: readiness READY WITH WARNINGS(83 pass, 1 warn), audit SAFE(62 pass), local smoke PASS(68 pass), Codex/GPT/Gemini local CLI probe와 Discord live token은 통과했지만 Claude CLI command가 없고 대부분 connector token/target, live browser UX, real-provider skill-learning, Hermes/OpenClaw same-host benchmark proof가 미충족이다.
+
+## 2026-05-30 54단계: ntfy push connector로 channel-breadth parity 보강
+
+- Hermes/OpenClaw 대비 lightweight push notification surface gap을 줄이기 위해 `ntfy` outbound connector를 first-class connector로 추가했다.
+- 공식 ntfy publish 문서 기준으로 topic URL에 HTTP `POST`/`PUT` plain text body를 보내면 메시지가 발행되고, access-control topic은 `Authorization: Bearer <token>` 방식의 access token을 사용할 수 있다.
+- `src/connectors/ntfy.ts`는 `NTFY_BASE_URL`, `NTFY_TOKEN`, `NTFY_TOPIC`, `NTFY_TOPICS`로 base/topic alias를 해석하고, approval-gated `ntfy:<alias>` 또는 scheduler delivery에서만 publish한다.
+- Raw topic은 직접 action target으로 받지 않고 alias 뒤에 숨기며, topic target은 safe name만 허용한다. Base URL credential/path traversal은 거부하고, `https`를 기본으로 하되 localhost test server만 `http`를 허용한다.
+- Push body는 기존 `chunkText`를 재사용해 bounded text로 나누고, no-cache push notification 성격을 명시하기 위해 `Title: Viser`, `Cache: no`, `Content-Type: text/plain; charset=UTF-8`를 붙인다.
+- Base URL, token, topic, alias, message body는 connector error, readiness/release evidence, backup/audit/docs 경로에서 redaction되도록 연결했다.
+- Config/env/readiness/audit/doctor/next-steps/verify/release-evidence/smoke/MCP/CLI help/action validation/scheduler delivery/dashboard status/docs/package metadata에 `ntfy` connector를 연결했다.
+- Local smoke와 release evidence objective matrix가 direct ntfy publish와 approval-gated outbound message path를 증거로 포함한다.
+- 실제 ntfy token/topic live proof, Claude CLI 설치/login proof, 대부분 connector live tokens/targets, live browser UX, real-provider skill-learning, Hermes/OpenClaw same-host benchmark proof는 외부/로컬 사용자 환경 proof가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+
+Reference:
+- ntfy publish/auth docs: https://docs.ntfy.sh/publish/
+
+Verification:
+- `npm run typecheck -- --pretty false` 통과.
+- Focused `node --test test/connectors.test.ts test/connector-access.test.ts test/actions.test.ts test/access.test.ts test/validate.test.ts test/smoke.test.ts test/release-evidence.test.ts test/config-validation.test.ts test/audit.test.ts test/backup.test.ts test/env.test.ts test/next-steps.test.ts test/readiness.test.ts test/assistant.test.ts` 통과: 299 pass, 0 fail.
+- `npm test` 통과: 572 pass, 0 fail.
+- `git diff --check` 통과.
+- `node src/index.ts verify --strict` 통과: readiness READY(51 pass), audit SAFE(63 pass), local smoke PASS(70 pass), gateway strict gate pass.
+- `node src/index.ts release-evidence` 통과: READY, local smoke 70 pass, completion은 live/competitor proof 부족으로 UNPROVEN 유지.
+- `npm pack --dry-run --json` 통과: 102 entries, `src/connectors/ntfy.ts` 포함.
+
+## 2026-05-30 55단계: Firecrawl Scrape API provider로 guarded web-fetch parity 보강
+
+- OpenClaw/Hermes 대비 web browse/fetch provider breadth gap을 줄이기 위해 guarded `web-fetch`에 `firecrawl-api` provider를 추가했다.
+- 공식 Firecrawl Scrape API 형식에 맞춰 `POST https://api.firecrawl.dev/v2/scrape`에 `Authorization: Bearer <key>`를 보내고, bounded body로 `url`, `formats`, `onlyMainContent`, `removeBase64Images`, `blockAds`, `timeout`만 전송한다.
+- Firecrawl remote scrape를 호출하기 전에도 기존 `normalizeWebFetchUrl`/public URL 검사를 먼저 수행해 credential URL, localhost/private/internal host/IP, unsupported protocol이 외부 provider로 전달되지 않게 유지했다.
+- Scrape 응답은 `data.markdown`, `data.html`, `data.rawHtml`만 읽고 기존 sanitizer/HTML stripper/ToolRunner dispatch/cache 경로를 재사용한다. Cache key에는 provider를 포함해 direct HTTP와 Firecrawl 결과가 섞이지 않게 했다.
+- `FIRECRAWL_API_KEY`는 web-search/web-fetch transport credential로 공유 가능하지만 model API key와 분리했다. `viser.config.json`에 literal `tools.webFetch.firecrawlApiKey`를 저장하면 audit/backup redaction 경로가 secret으로 처리한다.
+- Config validation, env-check/env-init, public example config, audit, backup redaction, MCP tool description, README/SECURITY docs, smoke/release-evidence objective matrix를 Firecrawl scrape-backed fetch support에 맞게 갱신했다.
+- Local smoke와 unit tests는 mocked Scrape endpoint, Bearer header, markdown/html format selection, script stripping, config key-source validation, missing-key audit failure, package evidence의 `[web-fetch-firecrawl]` inclusion을 검증한다.
+- ntfy connector가 이번 full verification에서 드러낸 fixture/evidence gap도 함께 보강해 pipe/slash connector help, release evidence source, safe proof normalization, direct config secret audit가 일관되게 동작하도록 했다.
+- Simplification: 새 dependency 없이 기존 guarded URL normalization, bounded response reader, sanitizer, cache, env/audit/backup redaction 경로를 재사용했다. Firecrawl scrape live call은 key가 있을 때만 활성화되는 provider branch로 제한했다.
+- 실제 Firecrawl Scrape API key live proof, Claude CLI 설치/login proof, 대부분 connector token/target live proof, live browser UX, real-provider skill-learning proof, Hermes/OpenClaw same-host benchmark artifact는 외부 환경 proof가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+
+Reference:
+- Firecrawl Scrape API docs: https://docs.firecrawl.dev/api-reference/endpoint/scrape
+- OpenClaw web tools docs: https://docs.openclaw.ai/tools/web
+
+Verification:
+- `npm run typecheck -- --pretty false` 통과.
+- Focused `node --test test/tools.test.ts test/config-validation.test.ts test/smoke.test.ts test/release-evidence.test.ts test/audit.test.ts test/backup.test.ts test/env.test.ts test/next-steps.test.ts` 통과: 143 pass, 0 fail.
+- Focused `node --test test/audit.test.ts test/preflight.test.ts test/verify.test.ts test/gateway-cli.test.ts test/launch-status.test.ts` 통과: 62 pass, 0 fail.
+- Focused `node --test test/release-evidence.test.ts test/verify.test.ts` 통과: 15 pass, 0 fail.
+- Focused serialized `node --test --test-concurrency=1 test/package-scripts.test.ts test/release-evidence.test.ts test/next-steps.test.ts test/verify.test.ts test/mcp-server.test.ts test/args.test.ts test/connectors.test.ts` 통과: 96 pass, 0 fail.
+- `npm test` 통과: 572 pass, 0 fail.
+- `git diff --check` 통과.
+- `node src/index.ts verify --strict` 통과: readiness READY(51 pass), audit SAFE(63 pass), local smoke PASS(70 pass), gateway strict gate pass.
+- `node src/index.ts release-evidence` 통과: READY, readiness READY(51 pass), audit SAFE(63 pass), local smoke PASS(70 pass), completion은 live/competitor proof 부족으로 UNPROVEN 유지.
+- `npm pack --dry-run --json` 통과: 102 entries, Firecrawl scrape-backed web-fetch surface 포함.
+- `node src/index.ts release-evidence --strict --live --probe-all-providers`는 예상대로 exit 1/UNPROVEN: verification PASS, readiness READY WITH WARNINGS(85 pass, 1 warn), audit SAFE(63 pass), local smoke PASS(70 pass), Codex/GPT/Gemini local CLI probe와 Discord live token은 통과했지만 Claude CLI command가 없고 대부분 connector token/target, ntfy live token/topic, live browser UX, real-provider skill-learning, Hermes/OpenClaw benchmark proof가 미충족이다.
+
+## 2026-05-30 55단계: Mastodon/Fediverse outbound connector로 social channel breadth 보강
+
+- Hermes/OpenClaw 대비 남은 channel-breadth gap을 줄이기 위해 Mastodon/Fediverse status outbound connector를 first-class connector로 추가했다.
+- 공식 Mastodon API 문서 기준으로 status creation은 `POST /api/v1/statuses`에 `status`와 `visibility` parameter를 보내고 OAuth Bearer token으로 인증한다.
+- `src/connectors/mastodon.ts`는 `MASTODON_BASE_URL`, `MASTODON_ACCESS_TOKEN`, `MASTODON_VISIBILITY`, `MASTODON_TARGETS`로 instance/account/visibility alias를 구성하고, approval-gated `mastodon:<alias>` 또는 scheduler delivery에서만 status를 게시한다.
+- 기본 visibility는 `private`로 둬서 새 connector가 실수로 공개 timeline에 게시하지 않게 했고, 필요할 때 `MASTODON_TARGETS='ops=unlisted'`처럼 alias별 visibility를 명시하도록 했다.
+- Config/types/readiness/env/audit/doctor/next-steps/verify/release-evidence/smoke/MCP/CLI help/action validation/scheduler delivery/dashboard status/docs/package metadata에 Mastodon connector를 연결했다.
+- Local smoke와 release evidence objective matrix가 direct Mastodon status publish와 approval-gated outbound message path를 증거로 포함한다.
+- 실제 Mastodon instance token/live credential proof, Claude CLI 설치/login proof, 대부분 connector live tokens/targets, live browser UX, real-provider skill-learning, Hermes/OpenClaw same-host benchmark proof는 외부/로컬 사용자 환경 proof가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+- Mastodon status API docs: https://docs.joinmastodon.org/methods/statuses/
+- Mastodon account credential API docs: https://docs.joinmastodon.org/methods/accounts/
+
+## 2026-05-30 56단계: Ollama Web Search provider로 OpenClaw web provider parity 보강
+
+- OpenClaw web tools/Ollama search surface와 Ollama Web Search API 문서에 맞춰 guarded `web-search` provider에 `ollama-api`를 추가했다.
+- Local Ollama daemon 기본값은 `http://127.0.0.1:11434/api/experimental/web_search`로 두고, hosted `https://ollama.com` base URL은 `/api/web_search`와 `Authorization: Bearer <OLLAMA_API_KEY>`를 사용한다.
+- Local daemon 호출에는 hosted `OLLAMA_API_KEY`를 보내지 않는다. Local endpoint가 `404`/`405`/`501`로 web search 미지원임을 나타내고 key가 있을 때만 hosted Ollama endpoint로 fallback한다.
+- `ollama-api` config validation은 remote base URL에 `https`를 요구하고 URL credential/query/hash를 거부한다. Localhost daemon만 `http`를 허용하며, hosted `https://ollama.com` provider는 env/literal key source가 있어야 한다.
+- Response parsing은 `results[]`의 title/url/content/snippet만 bounded result로 변환하고, 기존 web-search sanitizer를 재사용해 credential URL, localhost/private/internal result URL, JavaScript/script/style/noscript/comment content가 출력에 섞이지 않게 했다.
+- `OLLAMA_API_KEY`는 model API key가 아니라 web-search transport credential로 분리했고, literal `tools.webSearch.ollamaApiKey`는 audit/backup redaction/env-check 경로에서 secret으로 처리한다.
+- README/SECURITY/config example/.env.example/MCP description/package keyword/release evidence/smoke matrix를 DuckDuckGo/SearXNG/Brave/Tavily/Perplexity/Exa/Firecrawl/Ollama provider breadth에 맞게 갱신했다.
+- Mastodon direct-config audit가 disabled default `visibility: "private"`만으로 launch gate를 막던 fixture gap도 보완했다. Active Mastodon route의 direct base URL/token/targets/visibility는 계속 secret audit fail이지만, generated disabled default config는 pass한다.
+- Simplification: 새 dependency 없이 기존 web-search dispatch, bounded JSON fetch, URL/snippet sanitizer, env/audit/backup redaction, smoke/release-evidence evidence matrix를 재사용했다.
+- 실제 Ollama local daemon/hosted API live proof, Claude CLI 설치/login proof, 대부분 connector token/target live proof, live browser UX, real-provider skill-learning proof, Hermes/OpenClaw same-host benchmark artifact는 외부 환경 proof가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+
+Reference:
+- OpenClaw web tools docs: https://docs.openclaw.ai/tools/web
+- OpenClaw Ollama search docs: https://docs.openclaw.ai/tools/ollama-search
+- Ollama Web Search docs: https://ollama.com/blog/web-search
+
+Verification:
+- `npm run typecheck -- --pretty false` 통과.
+- `git diff --check` 통과.
+- Focused `node --test test/config-validation.test.ts test/audit.test.ts test/release-evidence.test.ts` 통과: 68 pass, 0 fail.
+- Focused `node --test test/tools.test.ts test/smoke.test.ts test/env.test.ts test/backup.test.ts` 통과: 72 pass, 0 fail.
+- Focused `node --test test/audit.test.ts test/gateway-cli.test.ts test/launch-status.test.ts` 통과: 56 pass, 0 fail.
+- `npm test` 통과: 581 pass, 0 fail.
+- `node src/index.ts verify --strict` 통과: readiness READY(52 pass), audit SAFE(64 pass), local smoke PASS(72 pass), gateway strict gate pass.
+- `node src/index.ts release-evidence` 통과: READY, readiness READY(52 pass), audit SAFE(64 pass), local smoke PASS(72 pass), completion은 live/competitor proof 부족으로 UNPROVEN 유지.
+- `npm pack --dry-run --json` 통과: 103 entries, Ollama-enabled web-search surface 포함.
+- `node src/index.ts release-evidence --strict --live --probe-all-providers`는 예상대로 exit 1/UNPROVEN: verification PASS, readiness READY WITH WARNINGS(87 pass, 1 warn), audit SAFE(64 pass), local smoke PASS(72 pass), Codex/GPT/Gemini local CLI probe와 Discord live token은 통과했지만 Claude CLI command가 없고 대부분 connector token/target, live browser UX, real-provider skill-learning, Hermes/OpenClaw benchmark proof가 미충족이다.
+
+## 2026-05-30 57단계: Browser Use Cloud browser-task action으로 Hermes/OpenClaw browser automation gap 축소
+
+- Hermes browser feature 문서와 Browser Use Cloud Task API 문서 기준으로, Viser에 숨겨진 provider browser tool이 아니라 승인 기반 `browser-task` action을 추가했다.
+- `browser-task`는 기본 비활성화이며 `actions.browserTask.enabled=true`, `BROWSER_USE_API_KEY`, public `allowedDomains`, bounded `maxSteps`가 있어야 승인 후에만 `POST https://api.browser-use.com/api/v2/tasks`를 호출한다.
+- Task 본문은 4000자 기본 cap, proposal-level public domain validation, config-level `maxTaskChars`/`maxAgentSteps`/`allowedDomains` enforcement를 모두 통과해야 pending action으로 저장된다.
+- Localhost, single-label host, `.local`/`.lan`/`.internal`, private/link-local/loopback/reserved IPv4, URL credential/path/port가 섞인 domain은 제안 단계와 config validation 단계에서 거부한다.
+- Browser Use API key는 env var(`BROWSER_USE_API_KEY`)로 읽고, literal config secret은 audit fail/backup redaction 대상이다. Error output에서도 API key가 redaction된다.
+- `AssistantRuntime`/CLI/help/state-health/smoke/release-evidence/audit/env-check/env-init/config example/docs/package metadata를 새 action surface에 맞춰 갱신했다.
+- Local smoke와 release evidence objective matrix는 `[browser-task]`와 `[browser-automation]` 증거를 포함하고, provider에게 숨겨진 web-control authority를 주지 않는 approval boundary를 명시한다.
+- Simplification: 새 dependency 없이 기존 `ActionStore`, approval/audit state, `fetchWithTimeout`, config validation, secret redaction, smoke/release-evidence matrix를 재사용했다. Browserbase/local-CDP/Firecrawl browse-session integration은 이번 pass에서 추가하지 않고 Browser Use Cloud task creation으로 bounded scope를 유지했다.
+- 실제 Browser Use API credential/task live proof, Browserbase/Firecrawl/local-CDP coverage, Claude CLI 설치/login proof, 대부분 connector live tokens/targets, live browser UX, real-provider skill-learning proof, Hermes/OpenClaw same-host benchmark artifact는 외부 환경 proof가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+
+Reference:
+- Hermes browser feature docs: https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/features/browser.md
+- Browser Use Cloud Task API docs: https://docs.browser-use.com/cloud/api-v2/tasks/create-task
+
+Verification:
+- `npm run typecheck -- --pretty false` 통과.
+- `git diff --check` 통과.
+- Focused `node --test test/actions.test.ts test/config-validation.test.ts test/audit.test.ts test/backup.test.ts test/env.test.ts test/smoke.test.ts test/release-evidence.test.ts test/state-health.test.ts` 통과: 186 pass, 0 fail.
+- `npm test` 통과: 589 pass, 0 fail.
+- `node src/index.ts verify --strict` 통과: readiness READY(52 pass), audit SAFE(65 pass), local smoke PASS(73 pass), gateway strict gate pass.
+- `node src/index.ts release-evidence` 통과: READY, readiness READY(52 pass), audit SAFE(65 pass), local smoke PASS(73 pass), completion은 live/competitor proof 부족으로 UNPROVEN 유지.
+- `npm pack --dry-run --json` 통과: 103 entries, Browser Use cloud browser-task surface 포함.
+- `node src/index.ts release-evidence --strict --live --probe-all-providers`는 예상대로 exit 1/UNPROVEN: verification PASS, readiness READY WITH WARNINGS(87 pass, 1 warn), audit SAFE(65 pass), local smoke PASS(73 pass), Codex/GPT/Gemini local CLI probe와 Discord live token은 통과했지만 Claude CLI command가 없고 대부분 connector token/target, Browser Use live task, live browser UX, real-provider skill-learning, Hermes/OpenClaw benchmark proof가 미충족이다.
+
+## 2026-05-30 58단계: local CDP browser-task provider로 credential 없는 browser automation parity 보강
+
+- Browser Use Cloud live credential proof가 없는 상태에서도 Hermes/OpenClaw browser automation gap을 줄이기 위해 `browser-task` provider를 `browser-use-cloud | local-cdp`로 확장했다.
+- Local CDP는 `VISER_BROWSER_CDP_URL`/`actions.browserTask.localCdpBaseUrl` 기본 `http://127.0.0.1:9222`만 사용하고, remote CDP host/path/query/credential은 config validation에서 거부한다.
+- 승인 후에만 `/json/new?<url>`로 public-domain tab을 만들고 CDP `Page.enable`/`Runtime.enable`/`Page.navigate`/`Runtime.evaluate`로 title/url/body text snapshot을 bounded size로 가져온다. `localCdpCloseTab` 기본값은 `true`라 실행 후 tab을 닫는다.
+- Task provider/domain/maxSteps는 pending action content/target에 저장되고 `state-health`가 provider-aware target consistency를 검증한다.
+- `browser-use-cloud` provider는 기존대로 API key가 없으면 audit fail이지만, `local-cdp` provider는 cloud API key 없이 localhost DevTools endpoint만으로 audit pass한다.
+- AssistantRuntime/CLI help/config/env-check/audit/state-health/smoke/release-evidence/README/SECURITY/package metadata/test coverage를 Browser Use cloud + local CDP 이중 provider surface에 맞춰 갱신했다.
+- Local smoke와 release evidence objective matrix는 Browser Use Cloud task creation뿐 아니라 localhost Chrome DevTools Protocol navigation/snapshot task도 approval-gated browser automation evidence로 포함한다.
+- Simplification: 새 dependency 없이 Node 내장 `fetch`/`WebSocket`, 기존 `ActionStore` approval gate, config validation, secret redaction, smoke/release-evidence evidence matrix를 재사용했다.
+- 실제 localhost Chrome/Chromium remote-debugging CDP run, Browser Use live API task, Browserbase/Firecrawl browse-session coverage, Claude CLI 설치/login proof, 대부분 connector live tokens/targets, live browser UX, real-provider skill-learning proof, Hermes/OpenClaw same-host benchmark artifact는 외부/로컬 사용자 환경 proof가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+
+Reference:
+- Chrome DevTools Protocol Target docs: https://chromedevtools.github.io/devtools-protocol/tot/Target/
+- Chrome DevTools Protocol Page docs: https://chromedevtools.github.io/devtools-protocol/tot/Page/
+- Chrome DevTools Protocol Runtime docs: https://chromedevtools.github.io/devtools-protocol/tot/Runtime/
+- Browser Use Cloud Task API docs: https://docs.browser-use.com/cloud/api-v2/tasks/create-task
+- Hermes browser feature docs: https://github.com/NousResearch/hermes-agent/blob/main/website/docs/user-guide/features/browser.md
+
+Verification:
+- `npm run typecheck -- --pretty false` 통과.
+- Focused `node --test test/actions.test.ts test/config-validation.test.ts test/audit.test.ts test/env.test.ts test/smoke.test.ts test/release-evidence.test.ts test/state-health.test.ts test/backup.test.ts` 통과: 189 pass, 0 fail.
+- `git diff --check` 통과.
+- `npm test` 통과: 592 pass, 0 fail.
+- `node src/index.ts verify --strict` 통과: readiness READY(52 pass), audit SAFE(65 pass), local smoke PASS(73 pass), gateway strict gate pass.
+- `node src/index.ts release-evidence` 통과: READY, readiness READY(52 pass), audit SAFE(65 pass), local smoke PASS(73 pass), completion은 live/competitor proof 부족으로 UNPROVEN 유지.
+- `npm pack --dry-run --json` 통과: 103 entries, Browser Use cloud/local-CDP browser-task surface 포함.
+- `node src/index.ts release-evidence --strict --live --probe-all-providers`는 예상대로 exit 1/UNPROVEN: verification PASS, readiness READY WITH WARNINGS(87 pass, 1 warn), audit SAFE(65 pass), local smoke PASS(73 pass), Codex/GPT/Gemini local CLI probe와 Discord live token은 통과했지만 Claude CLI command가 없고 대부분 connector token/target, Browser Use live task, real localhost CDP browser run, live browser UX, real-provider skill-learning, Hermes/OpenClaw benchmark proof가 미충족이다.
+
+## 2026-05-30 59단계: Browserbase/Firecrawl Interact browser-task provider로 remote browser session parity 보강
+
+- Hermes/OpenClaw 대비 남은 browser automation breadth gap 중 Browserbase/Firecrawl browse-session coverage를 줄이기 위해 `browser-task` provider를 `browser-use-cloud | local-cdp | browserbase-session | firecrawl-interact`로 확장했다.
+- `browserbase-session`은 `BROWSERBASE_API_KEY`와 선택적 `BROWSERBASE_PROJECT_ID`를 env-backed transport credential로 읽고, Browserbase `POST /v1/sessions`로 timeout/keepAlive=false session을 만든 뒤 반환된 `connectUrl`에 CDP WebSocket으로 붙어 public-domain page title/url/text snapshot을 가져온다. 기본값은 `browserbaseReleaseSession=true`라 실행 후 `REQUEST_RELEASE`를 요청한다.
+- `firecrawl-interact`는 기존 web-search/web-fetch와 같은 `FIRECRAWL_API_KEY` transport credential을 재사용하고, `POST /v2/scrape`로 받은 `data.metadata.scrapeId`를 `POST /v2/scrape/{scrapeId}/interact` prompt 실행에 사용한다. 기본값은 `firecrawlStopSession=true`라 `DELETE /v2/scrape/{scrapeId}/interact`로 session을 정리한다.
+- 두 remote provider 모두 기존 `allowedDomains`/`maxAgentSteps`/public-domain validation/approval gate를 그대로 통과해야 실행되며, direct config literal API key는 audit fail, backup/env-check에서는 redaction 대상이다.
+- Browserbase API base URL과 Firecrawl API base URL은 HTTPS origin만 허용하고 credential/query/hash/path를 거부한다. Browserbase `connectUrl`은 `wss:`만 허용해 remote CDP transport를 TLS로 제한한다.
+- `state-health`는 `browserbase-session:`/`firecrawl-interact:` targetPath prefix를 검증하고, local smoke/release evidence는 Browser Use Cloud, Browserbase, Firecrawl Interact, local CDP 네 provider가 모두 승인 전에는 실행되지 않고 승인 후에만 bounded public-domain task로 실행됨을 증거로 표시한다.
+- README/SECURITY/config example/.env template/package metadata/Assistant help/audit/env-check/config validation/test coverage를 새 provider set에 맞춰 갱신했다.
+- Simplification: 새 dependency 없이 기존 CDP WebSocket runner, `fetchWithTimeout`, ActionStore approval state, config validation, audit/env/backup redaction, smoke/release-evidence matrix를 재사용했다.
+- 실제 Browser Use/Browserbase/Firecrawl API credential task proof, real localhost CDP browser run, Claude CLI 설치/login proof, 대부분 connector live tokens/targets, live browser UX, real-provider skill-learning proof, Hermes/OpenClaw same-host benchmark artifact는 외부/로컬 사용자 환경 proof가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+
+Reference:
+- Browserbase Create Session API docs: https://docs.browserbase.com/reference/api/create-a-session
+- Browserbase keep-alive/release guidance: https://docs.browserbase.com/platform/browser/long-sessions/keep-alive
+- Firecrawl Interact docs: https://docs.firecrawl.dev/features/interact
+- Firecrawl Scrape endpoint docs: https://docs.firecrawl.dev/api-reference/endpoint/scrape
+
+Verification:
+- `npm run typecheck -- --pretty false` 통과.
+- Focused `node --test test/actions.test.ts test/config-validation.test.ts test/audit.test.ts test/env.test.ts test/smoke.test.ts test/release-evidence.test.ts test/state-health.test.ts test/backup.test.ts` 통과: 194 pass, 0 fail.
+- `git diff --check` 통과.
+- `npm test` 통과: 597 pass, 0 fail.
+- `node src/index.ts verify --strict` 통과: readiness READY(52 pass), audit SAFE(65 pass), local smoke PASS(73 pass), gateway strict gate pass.
+- `node src/index.ts release-evidence` 통과: READY, readiness READY(52 pass), audit SAFE(65 pass), local smoke PASS(73 pass), completion은 live/competitor proof 부족으로 UNPROVEN 유지.
+- `npm pack --dry-run --json` 통과: 103 entries, Browser Use/Browserbase/Firecrawl Interact/local-CDP browser-task surface 포함.
+- `node src/index.ts release-evidence --strict --live --probe-all-providers`는 예상대로 exit 1/UNPROVEN: verification PASS, readiness READY WITH WARNINGS(87 pass, 1 warn), audit SAFE(65 pass), local smoke PASS(73 pass), Codex/GPT/Gemini local CLI probe와 Discord live token은 통과했지만 Claude CLI command가 없고 대부분 connector token/target, Browser Use/Browserbase/Firecrawl live task, real localhost CDP browser run, live browser UX, real-provider skill-learning, Hermes/OpenClaw benchmark proof가 미충족이다.
+
+## 2026-05-30 60단계: real-provider skill reflection proof를 release evidence에 연결
+
+- Hermes식 self-improving loop parity에서 남아 있던 real-provider closed-loop evidence gap을 줄이기 위해 `release-evidence`가 `.viser/skills/reflection-proofs.jsonl`의 승인된 provider reflection proof를 읽도록 보강했다.
+- Proof는 configured provider이고 `echo`/fake/test/smoke provider가 아니며, 연결된 action이 `approved` 상태이고 target `SKILL.md`가 실제 존재할 때만 skill-learning evidence로 인정한다.
+- 공개 보고서에는 transcript 원문/hash/action path를 노출하지 않고 provider id, mode, transcript message 수, procedure byte 수만 요약한다.
+- 실제 Codex CLI provider로 `live-skill-proof` 세션을 실행한 뒤 `/reflect-skill live-provider-parity-proof ...`를 호출하고 action `e8fc1daf-689`를 승인해 `.viser/skills/live-provider-parity-proof/SKILL.md`와 proof `21327c2f-0c9`를 남겼다.
+- `release-evidence`의 `[skill-learning]` objective는 이제 `latest approved real-provider reflection proof exists (provider=codex, mode=manual, transcriptMessages=2, procedureBytes=891)`를 표시하며, 해당 objective의 real-provider closed-loop remaining proof는 사라진다.
+- Simplification: 새 dependency 없이 기존 action approval state, private skill proof JSONL, `readTextIfExists`/`fileExists` release-evidence helper를 재사용했다.
+- Claude CLI 설치/login, 대부분 connector live token/target proof, Browser Use/Browserbase/Firecrawl live task, real localhost CDP run, live browser UX, Hermes/OpenClaw same-host benchmark artifact는 여전히 외부/로컬 사용자 환경 proof가 필요하므로 completion audit은 계속 UNPROVEN으로 유지한다.
+
+Verification:
+- `npm run typecheck -- --pretty false` 통과.
+- Focused `node --test test/release-evidence.test.ts test/assistant.test.ts test/smoke.test.ts` 통과: 38 pass, 0 fail.
+- `git diff --check` 통과.
+- `node src/index.ts verify --strict` 통과: readiness READY(52 pass), audit SAFE(65 pass), local smoke PASS(73 pass), gateway strict gate pass.
+- `node src/index.ts release-evidence` 통과: READY, completion은 UNPROVEN 유지, skill-learning objective에 Codex real-provider reflection proof가 표시됨.
+- `node src/index.ts release-evidence --strict --live --probe-all-providers`는 예상대로 exit 1/UNPROVEN: Codex/GPT/Gemini local CLI probe와 Discord live token, skill-learning real-provider proof는 확인됐지만 Claude CLI command가 없고 대부분 connector token/target, Browser Use/Browserbase/Firecrawl live task, real localhost CDP browser run, live browser UX, Hermes/OpenClaw benchmark proof가 미충족이다.
+- `npm test` 통과: 598 pass, 0 fail.
+- `npm pack --dry-run --json` 통과: 103 entries.
+
+## 2026-06-11 75단계: 전역 Personalization 설정 구현
+
+- 사용자가 명시적으로 저장하는 전역 변수 저장소 `src/core/personalization.ts`를 추가했다.
+- `.viser/personalization/settings.json`에 AI 말투(`ai.tone`), AI 성격(`ai.personality`), 사용자 말투(`user.speechStyle`), 질문 처리 정보(`question.context`), 답변 형식(`answer.format`) 같은 설정을 private local JSON으로 저장한다.
+- CLI/slash command를 추가했다.
+  - `persona`, `personalization`, `settings`, `global`
+  - `persona set <key> <value>` / `persona unset <key>` / `persona clear --force`
+  - `tone`, `personality`, `user-style`, `question-info`, `answer-format` convenience command
+- 일반 provider prompt에 `Persistent personalization settings` 섹션을 추가했다.
+  - 저장된 전역 설정은 모든 세션/커넥터에 적용되지만, system/runtime/prompt-safety보다 높은 권한이 되지 않도록 untrusted block으로 감싼다.
+- 보안 보강을 추가했다.
+  - personalization key/value에 token, password, API key, 이메일, 전화번호, private key처럼 보이는 민감정보가 들어오면 저장을 거부한다.
+  - `audit`, `state-check`, `readiness`, `release-evidence`, `smoke`가 personalization state를 점검하도록 확장했다.
+- 문서와 공개 배포 hygiene를 갱신했다.
+  - README에 전역 personalization 사용법을 추가했다.
+  - PRIVACY/SECURITY에 personalization state가 private runtime state임을 반영했다.
+  - config example에 `personalization` section을 추가했다.
+- 검증:
+  - `npm run typecheck` 통과
+  - `node --test --test-concurrency=1 test/assistant.test.ts test/config-validation.test.ts test/state-health.test.ts` 통과
+  - `node src/index.ts smoke --strict` 통과
+  - `npm test` 전체 601개 테스트 통과
+- 추가 공개 배포 검증:
+  - `node src/index.ts audit` 통과 (SAFE, 67 pass)
+  - `node src/index.ts verify --strict` 통과 (PASS)
+  - `node src/index.ts release-evidence --strict` 통과 (READY, completion PROVEN)
+  - `npm pack --dry-run` 통과, `.env`, `.viser`, `.omx`, `viser.config.json`, `node_modules`가 tarball에 포함되지 않음을 확인했다.
+
+## 2026-06-11 install-safe CLI packaging checkpoint
+
+- Discovered that a globally installed package cannot rely on Node 22 native TypeScript stripping for `.ts` files under `node_modules` (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`).
+- Added a compiled `dist/index.js` package bin, `tsconfig.build.json`, `npm run build`, and `prepare` so `npm link`, git installs, and `npm pack` produce an install-safe `viser` command.
+- Added package-install smoke coverage that packs the tarball, installs it into a temporary prefix, runs `viser --help`, and verifies `mcp-client-config` points at the installed `dist/index.js` entrypoint.

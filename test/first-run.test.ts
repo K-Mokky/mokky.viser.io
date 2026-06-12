@@ -28,7 +28,7 @@ test("bare viser invocation performs non-destructive first-run setup", async () 
     assert.match(stdout, /Viser first-run setup/);
     assert.match(stdout, /Created .*viser\.config\.json/);
     assert.match(stdout, /Created .*\.env/);
-    assert.match(stdout, /run `viser` again to start chat/);
+    assert.match(stdout, /run `viser` in a terminal window to start the foreground runtime/);
     assert.ok(existsSync(join(dir, "viser.config.json")));
     assert.ok(existsSync(join(dir, ".env")));
     assert.ok(existsSync(join(dir, ".viser", "skills")));
