@@ -4,6 +4,14 @@
   "private": false,
   "description": "CLI-first personal AI assistant that talks to logged-in AI CLIs and can bridge Discord/Telegram messages.",
   "author": "KMokky",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/K-Mokky/mokky.viser.io.git"
+  },
+  "bugs": {
+    "url": "https://github.com/K-Mokky/mokky.viser.io/issues"
+  },
+  "homepage": "https://github.com/K-Mokky/mokky.viser.io#readme",
   "type": "module",
   "bin": {
     "viser": "./src/index.ts"

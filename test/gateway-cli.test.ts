@@ -387,6 +387,10 @@ async function writeCliConfig(
       discord: { ...DEFAULT_CONFIG.connectors.discord, allowedChannelIds: [], defaultChannelIds: [] }
     },
     providers: {
+      codex: { ...DEFAULT_CONFIG.providers.codex, env: { PATH: "" } },
+      gpt: { ...DEFAULT_CONFIG.providers.gpt, env: { PATH: "" } },
+      gemini: { ...DEFAULT_CONFIG.providers.gemini, env: { PATH: "" } },
+      claude: { ...DEFAULT_CONFIG.providers.claude, env: { PATH: "" } },
       echo: {
         id: "echo",
         label: "Echo",

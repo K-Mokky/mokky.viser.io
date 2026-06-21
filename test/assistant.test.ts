@@ -620,3 +620,27 @@ test("AssistantRuntime accepts bounded parallel job execution arguments", async 
     await rm(dir, { recursive: true, force: true });
   }
 });
+
+test("AssistantRuntime spaces provider calls when a min interval is configured", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-test-throttle-"));
+  try {
+    const base = testConfig(dir);
+    const config: ViserConfig = {
+      ...base,
+      assistant: { ...base.assistant, providerMinIntervalMs: 150 }
+    };
+    const provider = new EchoProvider();
+    const assistant = new AssistantRuntime(config, { echo: provider });
+
+    const started = Date.now();
+    await assistant.handle("first", "test:throttle", { source: "test" });
+    await assistant.handle("second", "test:throttle", { source: "test" });
+    const elapsed = Date.now() - started;
+
+    assert.equal(provider.prompts.length, 2);
+    // The first call never waits; the second must wait at least one interval.
+    assert.ok(elapsed >= 140, `expected throttled spacing, got ${elapsed}ms`);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

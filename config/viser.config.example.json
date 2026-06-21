@@ -5,6 +5,7 @@
     "systemPrompt": "You are Viser, a local-first CLI assistant created by KMokky. Be concise, practical, and ask before destructive actions.",
     "historyLimit": 12,
     "maxInputChars": 12000,
+    "providerMinIntervalMs": 1000,
     "workdir": ".",
     "fallbackProviders": [
       "gemini",

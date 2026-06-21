@@ -82,6 +82,9 @@ export interface AssistantConfig {
   historyLimit: number;
   maxInputChars: number;
   workdir: string;
+  // Optional: minimum milliseconds between outbound provider CLI invocations.
+  // Omit or set <= 0 to disable. Use it to avoid hammering a subscription CLI.
+  providerMinIntervalMs?: number;
 }
 
 export interface TelegramConnectorConfig {
@@ -191,6 +194,9 @@ export interface ViserConfig {
   connectors: {
     telegram: TelegramConnectorConfig;
     discord: DiscordConnectorConfig;
+    // Optional acknowledgement that relaying a single-seat provider login to
+    // chat peers may violate provider ToS and risk account bans.
+    acknowledgeRelayToS?: boolean;
   };
   providers: Record<string, CliProviderConfig>;
   configPath?: string;

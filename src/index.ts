@@ -22,6 +22,7 @@ import { writeExampleConfig } from "./cli/init.ts";
 import { nextStepsReport } from "./cli/next-steps.ts";
 import { preflight } from "./cli/preflight.ts";
 import { setupReport } from "./cli/setup.ts";
+import { onboardReport } from "./cli/onboard.ts";
 import { serviceCommand, trimServiceLogs } from "./cli/service.ts";
 import { localSmoke } from "./cli/smoke.ts";
 import { stateHealthReport } from "./cli/state-health.ts";
@@ -79,6 +80,13 @@ async function main(): Promise<void> {
 
   if (parsed.command === "setup") {
     console.log(await setupReport(flagBool(parsed.flags, "force")));
+    return;
+  }
+
+  if (parsed.command === "onboard" || parsed.command === "start-here" || parsed.command === "quickstart") {
+    const onboardConfig = await loadConfig({ configPath: flagString(parsed.flags, "config") });
+    const apply = !flagBool(parsed.flags, "check") && !flagBool(parsed.flags, "noSetup") && !flagBool(parsed.flags, "no-setup");
+    console.log(await onboardReport(onboardConfig, { apply }));
     return;
   }
 
@@ -637,6 +645,7 @@ function globalHelp(): string {
     "Viser - local-CLI-backed personal AI assistant",
     "",
     "Usage:",
+    "  viser onboard [--check]   # beginner-friendly first run",
     "  viser setup [--force]",
     "  viser init [--force]",
     "  viser doctor [--config ./viser.config.json]",
@@ -750,7 +759,7 @@ async function firstRunSetupReport(): Promise<string> {
 }
 
 function allowsMissingConfiguredEnv(command: string): boolean {
-  return new Set(["doctor", "env-check", "env", "environment", "env-init", "write-env", "init", "setup", "help"]).has(command);
+  return new Set(["doctor", "env-check", "env", "environment", "env-init", "write-env", "init", "setup", "onboard", "start-here", "quickstart", "help"]).has(command);
 }
 
 async function foregroundGate(
