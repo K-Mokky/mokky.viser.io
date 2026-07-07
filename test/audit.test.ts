@@ -226,6 +226,32 @@ test("auditItems fails for open messenger access", async () => {
   }
 });
 
+test("auditItems warns about messenger relay ToS risk until acknowledged", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-audit-relay-"));
+  try {
+    const config = auditConfig(dir);
+    config.connectors.telegram.enabled = true;
+
+    const warned = await auditItems(config);
+    assert.ok(warned.some((item) =>
+      item.area === "access"
+      && item.severity === "warn"
+      && /relays your single-seat provider subscription/.test(item.message)
+    ));
+
+    config.connectors.acknowledgeRelayToS = true;
+    const acknowledged = await auditItems(config);
+    assert.ok(acknowledged.some((item) =>
+      item.area === "access"
+      && item.severity === "pass"
+      && /relay ToS\/ban risk acknowledged/.test(item.message)
+    ));
+    assert.ok(!acknowledged.some((item) => /relays your single-seat provider subscription/.test(item.message)));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("auditItems detects messenger tokens stored in config files", async () => {
   const dir = await mkdtemp(join(tmpdir(), "viser-audit-secret-"));
   try {

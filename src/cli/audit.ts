@@ -5,7 +5,7 @@
 // enough to leave running?". The checks are intentionally deterministic and
 // local so they can run before any provider or messenger token is available.
 
-import { constants } from "node:fs";
+import { constants, readFileSync } from "node:fs";
 import { access, lstat, readFile, readdir } from "node:fs/promises";
 import { basename, delimiter, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { cwd } from "node:process";
@@ -699,6 +699,19 @@ function auditAccessAndConnectors(config: ViserConfig, configFile: unknown, item
       next: `Move it to ${config.connectors.discord.botTokenEnv} or .env.`
     });
   }
+
+  if (anyConnectorEnabled) {
+    if (config.connectors.acknowledgeRelayToS === true) {
+      items.push({ severity: "pass", area: "access", message: "messenger relay ToS/ban risk acknowledged (connectors.acknowledgeRelayToS=true)" });
+    } else {
+      items.push({
+        severity: "warn",
+        area: "access",
+        message: "messenger connector relays your single-seat provider subscription to chat peers",
+        next: "Relaying a personal Codex/Claude/Gemini login to other people can violate provider ToS and risk account bans; keep peers limited to yourself, then set connectors.acknowledgeRelayToS=true to acknowledge."
+      });
+    }
+  }
 }
 
 async function auditActions(config: ViserConfig, items: AuditItem[]): Promise<void> {
@@ -1064,11 +1077,12 @@ function localWorkspaceTokenPatterns(root: string, homeRoot: string): Array<{ id
   const rel = relative(home, resolvedRoot);
   if (!rel || rel.startsWith("..") || isAbsolute(rel)) return [];
 
+  const identity = projectPublicIdentityTokens(resolvedRoot);
   const tokens = new Set(
     rel
       .split(/[\\/]+/u)
       .map((part) => part.trim())
-      .filter((part) => isSensitiveLocalPathToken(part))
+      .filter((part) => isSensitiveLocalPathToken(part) && !identity.has(part.toLowerCase()))
   );
 
   return [...tokens].map((token) => ({
@@ -1076,6 +1090,38 @@ function localWorkspaceTokenPatterns(root: string, homeRoot: string): Array<{ id
     pattern: new RegExp(`\\b${escapeRegExp(token)}\\b`, "iu"),
     next: "Replace private local workspace path fragments with generic fixture names such as demo-workspace or example-project."
   }));
+}
+
+// The project's own published identity (package name and repository owner/name)
+// legitimately appears in onboarding docs, so it must not be flagged as a leaked
+// private local workspace token.
+function projectPublicIdentityTokens(root: string): Set<string> {
+  const tokens = new Set<string>();
+  try {
+    const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8")) as {
+      name?: unknown;
+      repository?: unknown;
+    };
+    if (typeof pkg.name === "string" && pkg.name.trim()) tokens.add(pkg.name.trim().toLowerCase());
+
+    const repoUrl =
+      typeof pkg.repository === "string"
+        ? pkg.repository
+        : pkg.repository && typeof pkg.repository === "object" && typeof (pkg.repository as { url?: unknown }).url === "string"
+          ? (pkg.repository as { url: string }).url
+          : undefined;
+    if (repoUrl) {
+      const cleaned = repoUrl.replace(/\.git$/iu, "").replace(/[#?].*$/u, "");
+      const segments = cleaned.split(/[\\/]+/u).map((part) => part.trim()).filter(Boolean);
+      for (const segment of segments.slice(-2)) {
+        const lower = segment.toLowerCase();
+        if (lower && !lower.includes(":") && lower.length >= 2) tokens.add(lower);
+      }
+    }
+  } catch {
+    // No readable package.json under this root: contribute no identity allowlist.
+  }
+  return tokens;
 }
 
 function isSensitiveLocalPathToken(value: string): boolean {

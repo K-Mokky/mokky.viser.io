@@ -21,6 +21,7 @@ const ACCESS_POLICIES = new Set(["pairing", "allowlist", "open"]);
 const LOCAL_WEB_DASHBOARD_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
 const MAX_JOB_CONCURRENCY = 6;
 const MAX_ASSISTANT_INPUT_CHARS = 50_000;
+const MAX_PROVIDER_MIN_INTERVAL_MS = 600_000;
 const MAX_CONNECTOR_MESSAGES_PER_MINUTE = 120;
 const MAX_CONNECTOR_INPUT_CHARS = 20_000;
 
@@ -79,6 +80,15 @@ function validateAssistant(value: unknown, providers: unknown, items: ConfigVali
     });
   }
   requireString(value, "assistant.workdir", items);
+  const providerMinIntervalMs = optionalPositiveInteger(value, "assistant.providerMinIntervalMs", items);
+  if (providerMinIntervalMs !== undefined && providerMinIntervalMs > MAX_PROVIDER_MIN_INTERVAL_MS) {
+    items.push({
+      severity: "fail",
+      path: "assistant.providerMinIntervalMs",
+      message: `must be at most ${MAX_PROVIDER_MIN_INTERVAL_MS}`,
+      next: "Keep the provider throttle interval reasonable so the assistant stays responsive."
+    });
+  }
 
   if (isPlainObject(providers)) {
     if (defaultProvider && !isPlainObject(providers[defaultProvider])) {
@@ -222,6 +232,10 @@ function validateActions(value: unknown, items: ConfigValidationItem[]): void {
 
 function validateConnectors(value: unknown, items: ConfigValidationItem[]): void {
   if (!section(value, "connectors", items)) return;
+  const ack = getLeaf(value, "connectors.acknowledgeRelayToS");
+  if (ack !== undefined && typeof ack !== "boolean") {
+    items.push({ severity: "fail", path: "connectors.acknowledgeRelayToS", message: "must be a boolean when present" });
+  }
   validateTelegram(value.telegram, items);
   validateDiscord(value.discord, items);
 }

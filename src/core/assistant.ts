@@ -19,6 +19,7 @@ import { mcpClientConfigReport, type McpClientConfigOptions } from "./mcp-client
 import { formatPluginDetail, formatPluginSelection, PluginRegistry } from "./plugins.ts";
 import { promptGuardDecision, promptSafetyContract, untrustedPromptBlock } from "./prompt-guard.ts";
 import { PROVIDER_FAILURE_PREFIX } from "./provider-output.ts";
+import { ProviderThrottle } from "./provider-throttle.ts";
 import { SkillRegistry } from "./skills.ts";
 import { ScheduleStore, parseScheduleInput } from "./scheduler.ts";
 import { ToolRunner } from "./tools.ts";
@@ -54,6 +55,7 @@ export class AssistantRuntime {
   private scheduleStore: ScheduleStore;
   private jobStore: JobStore;
   private sessionProviders = new Map<string, string>();
+  private providerThrottle: ProviderThrottle;
 
   constructor(config: ViserConfig, providers?: Record<string, ModelProvider>) {
     this.config = config;
@@ -66,6 +68,7 @@ export class AssistantRuntime {
     this.actionStore = new ActionStore(config.actions, { sendConnectorMessage: createConnectorMessageSender(config) });
     this.scheduleStore = new ScheduleStore(config.scheduler.dir);
     this.jobStore = new JobStore(config.jobs.dir);
+    this.providerThrottle = new ProviderThrottle(config.assistant.providerMinIntervalMs);
   }
 
   providerIds(): string[] {
@@ -416,6 +419,8 @@ export class AssistantRuntime {
 
       const prompt = this.composePrompt(userInput, sessionId, history, providerId, profileText, memoryText, skillCatalog, pluginCatalog, selectedSkill, selectedPlugin);
       try {
+        const throttleWaitMs = this.providerThrottle.reserve();
+        if (throttleWaitMs > 0) await new Promise((resolve) => setTimeout(resolve, throttleWaitMs));
         const response = await provider.generate({ prompt, sessionId, providerId });
         const answer = response.text || "(provider returned an empty response)";
 
