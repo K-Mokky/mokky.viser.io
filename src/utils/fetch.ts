@@ -21,7 +21,9 @@ export async function fetchWithTimeout(
     timedOut = true;
     controller.abort();
   }, Math.max(1, timeoutMs));
-  timeout.unref?.();
+  // The timer stays referenced on purpose: it is cleared in `finally` as soon
+  // as the fetch settles, and it must keep the event loop alive so a stalled
+  // fetch actually times out instead of letting the process exit early.
 
   try {
     return await fetchImpl(input, { ...init, signal: controller.signal });

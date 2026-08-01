@@ -177,6 +177,7 @@ export async function handleDiscordMessage(
   }
 
   try {
+    await sendDiscordTyping(token, message.channel_id);
     const answer = await assistant.handle(normalized, `discord:${message.channel_id}`, { source: "discord" });
     await sendDiscordMessage(token, message.channel_id, answer);
   } catch (error) {
@@ -195,6 +196,18 @@ export function normalizeDiscordInput(content: string, prefix: string, botUserId
   if (mention && trimmed.startsWith(mention)) return trimmed.slice(mention.length).trim() || "/help";
   if (nicknameMention && trimmed.startsWith(nicknameMention)) return trimmed.slice(nicknameMention.length).trim() || "/help";
   return undefined;
+}
+
+// Best-effort typing indicator; failures never block the reply.
+export async function sendDiscordTyping(token: string, channelId: string, options: DiscordRequestOptions = {}): Promise<void> {
+  try {
+    await fetchWithTimeout(options.fetchImpl ?? fetch, `${DISCORD_API_BASE}/channels/${channelId}/typing`, {
+      method: "POST",
+      headers: { authorization: `Bot ${token}` }
+    }, options.timeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS);
+  } catch {
+    // Typing indicator is cosmetic only.
+  }
 }
 
 export async function sendDiscordMessage(

@@ -400,6 +400,8 @@ export interface ScheduledDelivery {
 
 export interface ScheduledTask {
   id: string;
+  /** "prompt" tasks run through a provider; "reminder" tasks deliver the text directly. */
+  kind?: "prompt" | "reminder";
   prompt: string;
   sessionId: string;
   source: "cli" | "telegram" | "discord" | "test";
@@ -412,6 +414,15 @@ export interface ScheduledTask {
   intervalMs?: number;
   runCount: number;
   delivery: ScheduledDelivery;
+}
+
+export interface TodoItem {
+  id: string;
+  text: string;
+  done: boolean;
+  createdAt: string;
+  doneAt?: string;
+  source: string;
 }
 
 export type QueuedJobStatus = "pending" | "running" | "done" | "failed" | "cancelled";

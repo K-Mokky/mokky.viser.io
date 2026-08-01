@@ -255,6 +255,11 @@ node src/index.ts discord
 - `/skill <id> <task>`: 선택한 스킬을 prompt에 주입해 작업 실행
 - `/plugins`: 사용 가능한 local plugin manifest 목록
 - `/plugin <id> <command> <task>`: 선택한 plugin command를 prompt에 주입해 작업 실행
+- `/remind <duration> <text>`: 지정 시간 뒤에 리마인더 수신 (예: `/remind 10m 물 마시기`, provider 호출 없음)
+- `/remind every <duration> <text>` / `/remind at <ISO datetime> <text>`: 반복/시각 지정 리마인더
+- `/reminders`: 리마인더와 예약 작업 목록
+- `/todo <text>`: 할 일 추가 · `/todos`: 할 일 목록
+- `/todo done <id>` / `/todo rm <id>` / `/todo clear-done`: 할 일 완료/삭제/정리
 - `/schedule every <duration> <prompt>`: 반복 예약 작업 추가
 - `/schedule at <ISO datetime> <prompt>`: 1회 예약 작업 추가
 - `/schedules`: 예약 작업 목록

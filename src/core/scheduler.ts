@@ -156,14 +156,19 @@ export class SchedulerRunner {
     let ok = true;
     let output = "";
     try {
-      output = await this.assistant.handle(task.prompt, task.sessionId, {
-        source: task.source,
-        providerId: task.providerId
-      } satisfies AssistantHandleOptions);
-      if (isProviderFailureOutput(output)) {
-        ok = false;
-      } else {
+      if (task.kind === "reminder") {
+        output = formatReminderOutput(task.prompt);
         await this.notifier(task, output);
+      } else {
+        output = await this.assistant.handle(task.prompt, task.sessionId, {
+          source: task.source,
+          providerId: task.providerId
+        } satisfies AssistantHandleOptions);
+        if (isProviderFailureOutput(output)) {
+          ok = false;
+        } else {
+          await this.notifier(task, output);
+        }
       }
     } catch (error) {
       ok = false;
@@ -220,6 +225,54 @@ export function parseScheduleInput(
   }
 
   throw new Error("Schedule mode must be 'every' or 'at'.");
+}
+
+export function formatReminderOutput(text: string): string {
+  return `⏰ Reminder: ${text}`;
+}
+
+// Reminders are provider-free scheduled tasks: `/remind 10m drink water`,
+// `/remind every 1d stretch`, `/remind at 2026-08-02T09:00 team meeting`.
+export function parseRemindInput(
+  input: string,
+  context: { sessionId: string; source: ScheduledTask["source"] }
+): Omit<ScheduledTask, "id" | "createdAt" | "runCount"> {
+  const trimmed = input.trim();
+  if (!trimmed) {
+    throw new Error("Usage: /remind <duration> <text> OR /remind every <duration> <text> OR /remind at <ISO datetime> <text>");
+  }
+
+  const base = {
+    kind: "reminder" as const,
+    sessionId: context.sessionId,
+    source: context.source,
+    enabled: true,
+    delivery: deliveryForSession(context.sessionId)
+  };
+
+  const [first, second, ...restParts] = trimmed.split(/\s+/);
+
+  if (first === "every") {
+    const text = restParts.join(" ").trim();
+    if (!second || !text) throw new Error("Usage: /remind every <duration> <text>. Example: /remind every 1d stretch");
+    const intervalMs = parseDurationMs(second);
+    if (intervalMs < 60_000) throw new Error("Minimum recurring reminder interval is 1 minute.");
+    return { ...base, prompt: text, intervalMs, nextRunAt: new Date(Date.now() + intervalMs).toISOString() };
+  }
+
+  if (first === "at") {
+    const text = restParts.join(" ").trim();
+    if (!second || !text) throw new Error("Usage: /remind at <ISO datetime> <text>. Example: /remind at 2026-08-02T09:00 meeting");
+    const when = new Date(second);
+    if (Number.isNaN(when.valueOf())) throw new Error(`Invalid datetime '${second}'. Use an ISO-like value.`);
+    if (when <= new Date()) throw new Error("Reminder time must be in the future.");
+    return { ...base, prompt: text, nextRunAt: when.toISOString() };
+  }
+
+  const text = [second, ...restParts].filter(Boolean).join(" ").trim();
+  if (!text) throw new Error("Usage: /remind <duration> <text>. Example: /remind 10m drink water");
+  const delayMs = parseDurationMs(first);
+  return { ...base, prompt: text, nextRunAt: new Date(Date.now() + delayMs).toISOString() };
 }
 
 export function deliveryForSession(sessionId: string): ScheduledDelivery {

@@ -21,7 +21,8 @@ import { promptGuardDecision, promptSafetyContract, untrustedPromptBlock } from 
 import { PROVIDER_FAILURE_PREFIX } from "./provider-output.ts";
 import { ProviderThrottle } from "./provider-throttle.ts";
 import { SkillRegistry } from "./skills.ts";
-import { ScheduleStore, parseScheduleInput } from "./scheduler.ts";
+import { ScheduleStore, parseRemindInput, parseScheduleInput } from "./scheduler.ts";
+import { TodoStore } from "./todos.ts";
 import { ToolRunner } from "./tools.ts";
 import type {
   AssistantCommandResult,
@@ -53,6 +54,7 @@ export class AssistantRuntime {
   private tools: ToolRunner;
   private actionStore: ActionStore;
   private scheduleStore: ScheduleStore;
+  private todoStore: TodoStore;
   private jobStore: JobStore;
   private sessionProviders = new Map<string, string>();
   private providerThrottle: ProviderThrottle;
@@ -67,6 +69,7 @@ export class AssistantRuntime {
     this.tools = new ToolRunner(config.tools);
     this.actionStore = new ActionStore(config.actions, { sendConnectorMessage: createConnectorMessageSender(config) });
     this.scheduleStore = new ScheduleStore(config.scheduler.dir);
+    this.todoStore = new TodoStore(config.storage.dir);
     this.jobStore = new JobStore(config.jobs.dir);
     this.providerThrottle = new ProviderThrottle(config.assistant.providerMinIntervalMs);
   }
@@ -325,6 +328,17 @@ export class AssistantRuntime {
         return { handled: true, text: await this.pluginsText() };
       case "plugin":
         return { handled: true, text: await this.usePlugin(argument, sessionId, options) };
+      case "remind":
+      case "reminder":
+        return { handled: true, text: await this.remind(argument, sessionId, options) };
+      case "reminders":
+        return { handled: true, text: await this.scheduleStore.formatList() };
+      case "todo":
+      case "task":
+        return { handled: true, text: await this.todoCommand(argument, options.source ?? "cli") };
+      case "todos":
+      case "tasks":
+        return { handled: true, text: await this.todoStore.formatList() };
       case "schedule":
         return { handled: true, text: await this.schedule(argument, sessionId, options) };
       case "schedules":
@@ -649,6 +663,61 @@ export class AssistantRuntime {
     }
   }
 
+  private async remind(argument: string, sessionId: string, options: AssistantHandleOptions): Promise<string> {
+    if (!this.config.scheduler.enabled) return "Scheduler is disabled in config, so reminders are unavailable.";
+    try {
+      const task = await this.scheduleStore.add(
+        parseRemindInput(argument, { sessionId, source: options.source ?? "cli" })
+      );
+      const cadence = task.intervalMs ? `every ${Math.round(task.intervalMs / 60_000)}m` : "once";
+      return [
+        `Reminder set [${task.id}] (${cadence})`,
+        `- next: ${task.nextRunAt}`,
+        `- delivery: ${task.delivery.kind}${task.delivery.targetId ? `:${task.delivery.targetId}` : ""}`,
+        `- text: ${task.prompt}`,
+        "A running scheduler/gateway/service delivers it automatically. Cancel with /unschedule <id>."
+      ].join("\n");
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  }
+
+  private async todoCommand(argument: string, source: string): Promise<string> {
+    const [sub, ...rest] = argument.trim().split(/\s+/);
+    const restText = rest.join(" ").trim();
+
+    try {
+      switch ((sub ?? "").toLowerCase()) {
+        case "":
+        case "list":
+          return await this.todoStore.formatList();
+        case "done":
+        case "check": {
+          if (!restText) return "Usage: /todo done <id>";
+          const item = await this.todoStore.markDone(restText);
+          return item ? `Done ✅ [${item.id}] ${item.text}` : `No open todo found with id '${restText}'.`;
+        }
+        case "rm":
+        case "remove":
+        case "delete": {
+          if (!restText) return "Usage: /todo rm <id>";
+          const removed = await this.todoStore.remove(restText);
+          return removed ? `Removed todo '${restText}'.` : `No todo found with id '${restText}'.`;
+        }
+        case "clear-done": {
+          const cleared = await this.todoStore.clearDone();
+          return cleared > 0 ? `Cleared ${cleared} completed todo(s).` : "No completed todos to clear.";
+        }
+        default: {
+          const item = await this.todoStore.add(argument, source);
+          return `Added todo [${item.id}] ${item.text}\nList with /todos, complete with /todo done ${item.id}.`;
+        }
+      }
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error);
+    }
+  }
+
   private async unschedule(id: string): Promise<string> {
     if (!id) return "Schedule id is required. Example: /unschedule abc123";
     const removed = await this.scheduleStore.remove(id);
@@ -905,6 +974,11 @@ export class AssistantRuntime {
       "- /skill <id> <task>: run a task with a selected skill injected",
       "- /plugins: list local plugin manifests",
       "- /plugin <id> <command> <task>: run a task with a selected plugin command injected",
+      "- /remind <duration> <text>: get a reminder message (e.g. /remind 10m drink water)",
+      "- /remind every <duration> <text> | /remind at <ISO datetime> <text>: recurring/timed reminders",
+      "- /reminders: list reminders and scheduled tasks",
+      "- /todo <text>: add a todo · /todos: list todos",
+      "- /todo done <id> | /todo rm <id> | /todo clear-done: manage todos",
       "- /schedule every <duration> <prompt>: schedule recurring automation",
       "- /schedule at <ISO datetime> <prompt>: schedule one-time automation",
       "- /schedules: list scheduled tasks",

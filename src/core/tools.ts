@@ -292,6 +292,11 @@ function hardenedShellEnv(command: string | undefined): Record<string, string | 
   if (command !== "git") return undefined;
   return {
     GIT_EXTERNAL_DIFF: undefined,
+    // Environment-injected config (GIT_CONFIG_COUNT + GIT_CONFIG_KEY_n/VALUE_n)
+    // can smuggle diff.external/textconv hooks, and a partially stripped set
+    // breaks git outright, so drop the whole mechanism for tool shells.
+    GIT_CONFIG: undefined,
+    GIT_CONFIG_COUNT: undefined,
     GIT_PAGER: "cat",
     PAGER: "cat"
   };

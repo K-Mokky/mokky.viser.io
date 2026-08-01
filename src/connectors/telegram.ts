@@ -54,6 +54,7 @@ export async function runTelegramBridge(
     stopped = true;
   });
 
+  await registerTelegramCommands(token);
   console.log("Telegram bridge is running. Press Ctrl+C to stop.");
 
   while (!stopped) {
@@ -132,6 +133,7 @@ export async function handleTelegramUpdate(
   }
 
   try {
+    await sendTelegramTyping(token, chatId);
     const answer = await assistant.handle(message.text, `telegram:${chatId}`, { source: "telegram" });
     await sendTelegramMessage(token, chatId, answer);
   } catch (error) {
@@ -150,6 +152,36 @@ export function pairingRequiredMessage(connector: "telegram" | "discord"): strin
 
 export function pairedMessage(connector: "telegram" | "discord"): string {
   return `Paired this ${connector} chat with Viser. You can now send commands.`;
+}
+
+// Both calls below are best-effort UX affordances; failures never block replies.
+export async function sendTelegramTyping(token: string, chatId: string, options: TelegramRequestOptions = {}): Promise<void> {
+  try {
+    await telegramCall(token, "sendChatAction", { chat_id: chatId, action: "typing" }, options);
+  } catch {
+    // Typing indicator is cosmetic only.
+  }
+}
+
+export const TELEGRAM_BOT_COMMANDS: Array<{ command: string; description: string }> = [
+  { command: "help", description: "Show all commands" },
+  { command: "status", description: "Show assistant status" },
+  { command: "remind", description: "Set a reminder: /remind 10m text" },
+  { command: "reminders", description: "List reminders" },
+  { command: "todo", description: "Add or manage todos" },
+  { command: "todos", description: "List todos" },
+  { command: "remember", description: "Save a long-term memory" },
+  { command: "memory", description: "Search long-term memories" },
+  { command: "provider", description: "Switch AI provider" },
+  { command: "reset", description: "Clear this chat's history" }
+];
+
+export async function registerTelegramCommands(token: string, options: TelegramRequestOptions = {}): Promise<void> {
+  try {
+    await telegramCall(token, "setMyCommands", { commands: TELEGRAM_BOT_COMMANDS }, options);
+  } catch (error) {
+    console.error(`Telegram setMyCommands failed (continuing): ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 export async function sendTelegramMessage(
