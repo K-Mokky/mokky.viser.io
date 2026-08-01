@@ -567,6 +567,20 @@ npm pack --dry-run
 
 `LICENSE`는 MIT로 제공되고, 공개 표기는 프로젝트 이름 `Viser`와 제작자 `KMokky`로 제한해요. 실제 token은 `.env`/shell에만 두고, `.viser/` runtime state와 `.omx/` orchestration state는 GitHub/npm 공개 대상에서 제외해야 해요. 보안 이슈 제보 지침은 `SECURITY.md`에 있어요.
 
+## 메신저 비서 퀵스타트
+
+Telegram/Discord를 연결하면 Viser를 개인 비서처럼 쓸 수 있어요. 페어링 후 채팅에서 바로:
+
+- `/start` — 환영 인사와 핵심 사용법
+- 일반 메시지 — 로그인된 AI CLI가 답변 (답변 생성 중 "입력 중…" 표시)
+- `10분 뒤에 물 마시라고 알려줘` 또는 `remind me in 10 minutes to drink water` — 자연어 리마인더가 그 채팅방으로 돌아와요
+- `/remind 10m 물 마시기` / `/remind every 1d 스트레칭` — 명령형 리마인더
+- `/todo 우유 사기` → `/todos` → `/todo done <id>` — 할 일 관리
+- `/brief` — 할 일·리마인더·장기 메모리를 반영한 데일리 브리핑
+- `/remember 회의는 항상 오전 10시 #일정` — 장기 기억 등록
+
+리마인더가 실제로 배달되려면 `node src/index.ts gateway`(브리지+스케줄러 통합 실행) 또는 별도의 `scheduler`가 떠 있어야 해요. Telegram 브리지는 확인한 메시지 오프셋을 저장소에 기록하므로, 재시작해도 이미 응답한 메시지를 다시 처리하지 않아요.
+
 ## Telegram 연결
 
 1. BotFather에서 Telegram 봇 토큰을 만들어요.
