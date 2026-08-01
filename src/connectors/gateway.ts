@@ -41,7 +41,7 @@ export async function runGateway(config: ViserConfig, assistant: AssistantRuntim
   }
 
   if (config.connectors.telegram.enabled || config.connectors.telegram.botToken) {
-    if (config.connectors.telegram.botToken) tasks.push(runTelegramBridge(config.connectors.telegram, assistant, access));
+    if (config.connectors.telegram.botToken) tasks.push(runTelegramBridge(config.connectors.telegram, assistant, access, { stateDir: config.storage.dir }));
     else console.warn(`Telegram is enabled but ${config.connectors.telegram.botTokenEnv} is missing; skipping.`);
   }
 

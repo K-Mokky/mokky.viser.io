@@ -275,6 +275,37 @@ export function parseRemindInput(
   return { ...base, prompt: text, nextRunAt: new Date(Date.now() + delayMs).toISOString() };
 }
 
+const NATURAL_REMINDER_PATTERNS: Array<{ regex: RegExp; unitIndex: number; amountIndex: number; textIndex: number }> = [
+  // Korean: "10분 뒤에 물 마시라고 알려줘" / "2시간 후 회의 알려 줘"
+  { regex: /^(\d+)\s*(초|분|시간|일)\s*(?:뒤|후)에?\s+(.+?)\s*(?:을|를|이라고|라고)?\s*알려\s*줘\.?$/u, amountIndex: 1, unitIndex: 2, textIndex: 3 },
+  // English: "remind me in 10 minutes to drink water" / "remind me in 2h about the meeting"
+  { regex: /^remind me in\s+(\d+)\s*(s|secs?|seconds?|m|mins?|minutes?|h|hours?|d|days?)\s+(?:to\s+|about\s+)?(.+)$/iu, amountIndex: 1, unitIndex: 2, textIndex: 3 }
+];
+
+const NATURAL_UNIT_MS: Record<string, number> = {
+  "초": 1000, s: 1000, sec: 1000, secs: 1000, second: 1000, seconds: 1000,
+  "분": 60_000, m: 60_000, min: 60_000, mins: 60_000, minute: 60_000, minutes: 60_000,
+  "시간": 3_600_000, h: 3_600_000, hour: 3_600_000, hours: 3_600_000,
+  "일": 86_400_000, d: 86_400_000, day: 86_400_000, days: 86_400_000
+};
+
+// Conservative natural-language reminder detection. Only unambiguous
+// "remind me in <n> <unit> ..." shapes are intercepted; everything else still
+// goes to the provider untouched.
+export function parseNaturalReminder(input: string): { delayMs: number; text: string } | undefined {
+  const trimmed = input.trim();
+  for (const pattern of NATURAL_REMINDER_PATTERNS) {
+    const match = pattern.regex.exec(trimmed);
+    if (!match) continue;
+    const amount = Number(match[pattern.amountIndex]);
+    const unitMs = NATURAL_UNIT_MS[match[pattern.unitIndex].toLowerCase()];
+    const text = match[pattern.textIndex].trim();
+    if (!Number.isFinite(amount) || amount <= 0 || !unitMs || !text) continue;
+    return { delayMs: amount * unitMs, text };
+  }
+  return undefined;
+}
+
 export function deliveryForSession(sessionId: string): ScheduledDelivery {
   if (sessionId.startsWith("telegram:")) return { kind: "telegram", targetId: sessionId.slice("telegram:".length) };
   if (sessionId.startsWith("discord:")) return { kind: "discord", targetId: sessionId.slice("discord:".length) };

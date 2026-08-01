@@ -4,7 +4,8 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { TodoStore } from "../src/core/todos.ts";
-import { formatReminderOutput, parseRemindInput } from "../src/core/scheduler.ts";
+import { formatReminderOutput, parseNaturalReminder, parseRemindInput } from "../src/core/scheduler.ts";
+import { TelegramOffsetStore } from "../src/connectors/telegram.ts";
 
 async function withStore(run: (store: TodoStore) => Promise<void>): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "viser-todos-"));
@@ -75,4 +76,33 @@ test("parseRemindInput rejects bad input", () => {
 
 test("formatReminderOutput prefixes the reminder text", () => {
   assert.equal(formatReminderOutput("drink water"), "⏰ Reminder: drink water");
+});
+
+test("parseNaturalReminder detects Korean and English reminder phrases", () => {
+  assert.deepEqual(parseNaturalReminder("10분 뒤에 물 마시라고 알려줘"), { delayMs: 600_000, text: "물 마시" });
+  assert.deepEqual(parseNaturalReminder("2시간 후 회의 알려줘"), { delayMs: 7_200_000, text: "회의" });
+  assert.deepEqual(parseNaturalReminder("remind me in 10 minutes to drink water"), { delayMs: 600_000, text: "drink water" });
+  assert.deepEqual(parseNaturalReminder("Remind me in 2h about the meeting"), { delayMs: 7_200_000, text: "the meeting" });
+});
+
+test("parseNaturalReminder leaves ordinary messages alone", () => {
+  assert.equal(parseNaturalReminder("what is the capital of France?"), undefined);
+  assert.equal(parseNaturalReminder("10분 뒤에 뭐 하지"), undefined);
+  assert.equal(parseNaturalReminder("remind me why this failed"), undefined);
+  assert.equal(parseNaturalReminder(""), undefined);
+});
+
+test("TelegramOffsetStore persists and validates offsets", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-tg-offset-"));
+  try {
+    const store = new TelegramOffsetStore(dir);
+    assert.equal(await store.read(), undefined);
+    await store.write(42);
+    assert.equal(await store.read(), 42);
+
+    const fresh = new TelegramOffsetStore(dir);
+    assert.equal(await fresh.read(), 42);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });

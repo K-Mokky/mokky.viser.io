@@ -468,7 +468,7 @@ async function main(): Promise<void> {
         return;
       }
       if (!await foregroundGate("telegram", config, parsed.flags)) return;
-      await runTelegramBridge(config.connectors.telegram, assistant, access);
+      await runTelegramBridge(config.connectors.telegram, assistant, access, { stateDir: config.storage.dir });
       return;
     case "discord":
       if (!config.connectors.discord.botToken) {

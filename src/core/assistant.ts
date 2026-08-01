@@ -21,7 +21,7 @@ import { promptGuardDecision, promptSafetyContract, untrustedPromptBlock } from 
 import { PROVIDER_FAILURE_PREFIX } from "./provider-output.ts";
 import { ProviderThrottle } from "./provider-throttle.ts";
 import { SkillRegistry } from "./skills.ts";
-import { ScheduleStore, parseRemindInput, parseScheduleInput } from "./scheduler.ts";
+import { ScheduleStore, deliveryForSession, parseNaturalReminder, parseRemindInput, parseScheduleInput } from "./scheduler.ts";
 import { TodoStore } from "./todos.ts";
 import { ToolRunner } from "./tools.ts";
 import type {
@@ -84,6 +84,11 @@ export class AssistantRuntime {
 
     const command = await this.tryHandleCommand(trimmed, sessionId, options);
     if (command.handled) return command.text ?? "";
+
+    if (this.config.scheduler.enabled) {
+      const natural = parseNaturalReminder(trimmed);
+      if (natural) return await this.addNaturalReminder(natural, sessionId, options);
+    }
 
     return await this.runProvider(trimmed, sessionId, options);
   }
@@ -266,8 +271,14 @@ export class AssistantRuntime {
 
     switch (command.toLowerCase()) {
       case "help":
-      case "start":
         return { handled: true, text: this.helpText() };
+      case "start":
+      case "hi":
+      case "hello":
+        return { handled: true, text: this.welcomeText() };
+      case "brief":
+      case "briefing":
+        return { handled: true, text: await this.brief(argument, sessionId, options) };
       case "providers":
         return { handled: true, text: this.providersText() };
       case "provider":
@@ -663,6 +674,65 @@ export class AssistantRuntime {
     }
   }
 
+  private async addNaturalReminder(
+    natural: { delayMs: number; text: string },
+    sessionId: string,
+    options: AssistantHandleOptions
+  ): Promise<string> {
+    const task = await this.scheduleStore.add({
+      kind: "reminder",
+      prompt: natural.text,
+      sessionId,
+      source: options.source ?? "cli",
+      enabled: true,
+      nextRunAt: new Date(Date.now() + natural.delayMs).toISOString(),
+      delivery: deliveryForSession(sessionId)
+    });
+    return [
+      `Reminder set [${task.id}]`,
+      `- next: ${task.nextRunAt}`,
+      `- text: ${task.prompt}`,
+      "Cancel with /unschedule " + task.id + ". A running scheduler/gateway/service delivers it."
+    ].join("\n");
+  }
+
+  private async brief(argument: string, sessionId: string, options: AssistantHandleOptions): Promise<string> {
+    const [todos, schedules] = await Promise.all([
+      this.todoStore.formatList(),
+      this.config.scheduler.enabled ? this.scheduleStore.formatList() : Promise.resolve("(scheduler disabled)")
+    ]);
+    const task = [
+      argument.trim() || "Create a concise daily brief: top priorities, deadlines, and what needs a reply. Answer in the user's language.",
+      "",
+      "Current todo list:",
+      todos,
+      "",
+      "Current reminders and scheduled tasks:",
+      schedules
+    ].join("\n");
+
+    if (this.config.skills.enabled) {
+      const skill = await this.skills.get("daily-brief");
+      if (skill) return await this.runProvider(task, sessionId, options, skill);
+    }
+    return await this.runProvider(task, sessionId, options);
+  }
+
+  private welcomeText(): string {
+    const name = this.config.assistant.name;
+    return [
+      `👋 ${name} is ready. Just send a normal message and your logged-in AI CLI answers.`,
+      "",
+      "Handy secretary commands:",
+      "- /remind 10m drink water · 10분 뒤에 물 마시라고 알려줘 (natural language works too)",
+      "- /todo <text> · /todos: manage your task list",
+      "- /brief: daily briefing built from your todos, reminders, and memory",
+      "- /remember <text> #tag: teach me a long-term fact",
+      "- /schedule every 1d <prompt>: recurring automation",
+      "- /help: the full command list"
+    ].join("\n");
+  }
+
   private async remind(argument: string, sessionId: string, options: AssistantHandleOptions): Promise<string> {
     if (!this.config.scheduler.enabled) return "Scheduler is disabled in config, so reminders are unavailable.";
     try {
@@ -974,7 +1044,10 @@ export class AssistantRuntime {
       "- /skill <id> <task>: run a task with a selected skill injected",
       "- /plugins: list local plugin manifests",
       "- /plugin <id> <command> <task>: run a task with a selected plugin command injected",
+      "- /start: short welcome and quickstart",
+      "- /brief [focus]: daily briefing built from todos, reminders, and memory",
       "- /remind <duration> <text>: get a reminder message (e.g. /remind 10m drink water)",
+      "  Natural language also works: 'remind me in 10 minutes to drink water' / '10분 뒤에 물 마시라고 알려줘'",
       "- /remind every <duration> <text> | /remind at <ISO datetime> <text>: recurring/timed reminders",
       "- /reminders: list reminders and scheduled tasks",
       "- /todo <text>: add a todo · /todos: list todos",

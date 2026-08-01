@@ -100,6 +100,10 @@ export async function runCommand(options: RunCommandOptions): Promise<RunCommand
       });
     });
 
+    // A child that exits before draining stdin makes this write EPIPE; without
+    // a listener that surfaces as an uncaught exception. The close handler
+    // already reports the child's real outcome, so the write error is noise.
+    child.stdin.on("error", () => {});
     if (options.stdin) child.stdin.end(options.stdin);
     else child.stdin.end();
   });

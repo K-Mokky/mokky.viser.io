@@ -4,7 +4,9 @@
 // Telegram uses the Bot API for message transport. LLM access still happens
 // through local logged-in CLIs inside AssistantRuntime.
 
+import { join } from "node:path";
 import { AccessStore } from "../core/access.ts";
+import { ensurePrivateDir, readPrivateFileIfExists, writePrivateFile } from "../utils/files.ts";
 import { connectorInputLimitMessage, connectorInputTooLong } from "./input-policy.ts";
 import { ConnectorRateLimiter, connectorRateLimitMessage } from "./rate-limit.ts";
 import { DEFAULT_FETCH_TIMEOUT_MS, fetchWithTimeout, type FetchLike } from "../utils/fetch.ts";
@@ -36,16 +38,23 @@ export interface TelegramRequestOptions {
   timeoutMs?: number;
 }
 
+export interface TelegramBridgeOptions {
+  /** Directory for durable bridge state (long-poll offset). Omit to keep state in memory only. */
+  stateDir?: string;
+}
+
 export async function runTelegramBridge(
   config: TelegramConnectorConfig,
   assistant: AssistantRuntime,
-  access?: AccessStore
+  access?: AccessStore,
+  bridgeOptions: TelegramBridgeOptions = {}
 ): Promise<void> {
   const token = config.botToken;
   if (!token) throw new Error(`Telegram token is missing. Set ${config.botTokenEnv}.`);
   const rateLimiter = new ConnectorRateLimiter(config.maxMessagesPerMinute);
 
-  let offset = 0;
+  const offsetStore = bridgeOptions.stateDir ? new TelegramOffsetStore(bridgeOptions.stateDir) : undefined;
+  let offset = (await offsetStore?.read()) ?? 0;
   let stopped = false;
   process.once("SIGINT", () => {
     stopped = true;
@@ -59,7 +68,11 @@ export async function runTelegramBridge(
 
   while (!stopped) {
     try {
-      offset = await pollTelegramUpdates(token, config, assistant, offset, access, rateLimiter);
+      const nextOffset = await pollTelegramUpdates(token, config, assistant, offset, access, rateLimiter);
+      if (nextOffset !== offset) {
+        offset = nextOffset;
+        await offsetStore?.write(offset);
+      }
     } catch (error) {
       if (stopped) break;
       console.error(`Telegram polling failed; retrying: ${error instanceof Error ? error.message : String(error)}`);
@@ -154,6 +167,42 @@ export function pairedMessage(connector: "telegram" | "discord"): string {
   return `Paired this ${connector} chat with Viser. You can now send commands.`;
 }
 
+// Persisting the confirmed long-poll offset means a restarted bridge does not
+// replay the backlog of already-answered messages.
+export class TelegramOffsetStore {
+  private dir: string;
+
+  constructor(dir: string) {
+    this.dir = dir;
+  }
+
+  async read(): Promise<number | undefined> {
+    try {
+      const raw = await readPrivateFileIfExists(this.path(), { dirs: [this.dir] });
+      if (raw === undefined) return undefined;
+      const parsed = JSON.parse(raw) as { offset?: unknown };
+      return typeof parsed.offset === "number" && Number.isInteger(parsed.offset) && parsed.offset >= 0
+        ? parsed.offset
+        : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  async write(offset: number): Promise<void> {
+    try {
+      await ensurePrivateDir(this.dir);
+      await writePrivateFile(this.path(), `${JSON.stringify({ offset })}\n`);
+    } catch (error) {
+      console.error(`Telegram offset persistence failed (continuing): ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  private path(): string {
+    return join(this.dir, "telegram-offset.json");
+  }
+}
+
 // Both calls below are best-effort UX affordances; failures never block replies.
 export async function sendTelegramTyping(token: string, chatId: string, options: TelegramRequestOptions = {}): Promise<void> {
   try {
@@ -164,7 +213,9 @@ export async function sendTelegramTyping(token: string, chatId: string, options:
 }
 
 export const TELEGRAM_BOT_COMMANDS: Array<{ command: string; description: string }> = [
+  { command: "start", description: "Welcome and quickstart" },
   { command: "help", description: "Show all commands" },
+  { command: "brief", description: "Daily briefing from todos and reminders" },
   { command: "status", description: "Show assistant status" },
   { command: "remind", description: "Set a reminder: /remind 10m text" },
   { command: "reminders", description: "List reminders" },
