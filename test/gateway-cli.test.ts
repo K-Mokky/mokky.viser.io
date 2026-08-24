@@ -376,6 +376,7 @@ async function writeCliConfig(
     assistant: { ...DEFAULT_CONFIG.assistant, defaultProvider: "echo", fallbackProviders: [], workdir: dir },
     storage: { dir: join(dir, ".viser") },
     memory: { ...DEFAULT_CONFIG.memory, dir: join(dir, ".viser", "memory") },
+    globals: { ...DEFAULT_CONFIG.globals, dir: join(dir, ".viser", "globals") },
     skills: { ...DEFAULT_CONFIG.skills, dirs: [join(dir, "skills"), join(dir, ".viser", "skills")] },
     tools: { ...DEFAULT_CONFIG.tools, allowedReadRoots: [dir] },
     scheduler: { ...DEFAULT_CONFIG.scheduler, enabled: loopsEnabled, dir: join(dir, ".viser", "scheduler") },
@@ -391,6 +392,8 @@ async function writeCliConfig(
       gpt: { ...DEFAULT_CONFIG.providers.gpt, env: { PATH: "" } },
       gemini: { ...DEFAULT_CONFIG.providers.gemini, env: { PATH: "" } },
       claude: { ...DEFAULT_CONFIG.providers.claude, env: { PATH: "" } },
+      grok: { ...DEFAULT_CONFIG.providers.grok, env: { PATH: "" } },
+      cursor: { ...DEFAULT_CONFIG.providers.cursor, env: { PATH: "" } },
       echo: {
         id: "echo",
         label: "Echo",

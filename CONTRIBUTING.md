@@ -3,7 +3,7 @@
 Thanks for helping improve **Viser**, a local-first assistant runtime by
 **KMokky**. Contributions should preserve the project goal: talk to users through
 CLI and optional Telegram/Discord bridges while using already logged-in local AI
-CLIs instead of GPT/Gemini/Claude model HTTP APIs or model API keys.
+CLIs instead of GPT/Gemini/Claude/Grok/Cursor model HTTP APIs or model API keys.
 
 ## Ground rules
 
@@ -13,8 +13,8 @@ CLIs instead of GPT/Gemini/Claude model HTTP APIs or model API keys.
   transcripts, memory entries, messenger chat/channel IDs, personal handles,
   emails, local filesystem paths, or real tokens.
 - Do not add model API key requirements or fallback HTTP model clients for the
-  core GPT/Codex, Gemini, or Claude routes. They must keep using local CLI
-  commands (`codex`, `gemini`, `claude`).
+  core GPT/Codex, Gemini, Claude, Grok, or Cursor routes. They must keep using local CLI
+  commands (`codex`, `gemini`, `claude`, `grok`, `cursor-agent`).
 - Keep mutation behind approval-gated actions. Do not add hidden provider tools
   that write files, open URLs, send messages, or access external apps without a
   `/propose` + approval boundary.

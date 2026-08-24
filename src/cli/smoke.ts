@@ -91,6 +91,14 @@ export async function localSmoke(config: ViserConfig, options: SmokeOptions = {}
       expectIncludes(await assistant.handle("/memory smoke", sessionId, { source: "test" }), "concise Korean");
       expectIncludes(await assistant.handle("/profile", sessionId, { source: "test" }), "smoke");
     });
+    await step(items, "globals", "operator globals persist persona settings and inject into later prompts", async () => {
+      expectIncludes(await assistant.handle("/global set tone concise Korean", sessionId, { source: "test" }), "Stored global");
+      expectIncludes(await assistant.handle("/global", sessionId, { source: "test" }), "concise Korean");
+      expectIncludes(await assistant.handle("hello globals", sessionId, { source: "test" }), "SMOKE_PROVIDER_OK");
+      if (!smokeProvider.prompts.at(-1)?.includes("concise Korean")) {
+        throw new Error("Operator globals were not injected into the provider prompt.");
+      }
+    });
 
     await step(items, "tools", "explicit read-only local tool can read allowed files", async () => {
       expectIncludes(await assistant.handle("/tool read-file seed.txt", sessionId, { source: "test" }), "SMOKE_SEED");
@@ -282,6 +290,7 @@ async function createSmokeConfig(config: ViserConfig, artifactDir: string): Prom
     },
     storage: { dir: join(state, "storage") },
     memory: { ...config.memory, enabled: true, dir: join(state, "memory"), promptLimit: 8 },
+    globals: { ...config.globals, enabled: true, dir: join(state, "globals") },
     skills: { ...config.skills, enabled: true, dirs: [join(artifactDir, "skills")], promptLimit: 8 },
     plugins: { ...config.plugins, enabled: true, dirs: [join(artifactDir, "plugins")], promptLimit: 8 },
     tools: {
@@ -407,9 +416,11 @@ class SmokeProvider implements ModelProvider {
   id = "smoke";
   label = "Smoke Provider";
   calls = 0;
+  prompts: string[] = [];
 
   async generate(request: ProviderRequest): Promise<ProviderResponse> {
     this.calls += 1;
+    this.prompts.push(request.prompt);
     return {
       providerId: this.id,
       text: `SMOKE_PROVIDER_OK ${request.providerId} ${request.sessionId}`,

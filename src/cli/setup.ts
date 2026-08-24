@@ -30,7 +30,7 @@ export async function setupReport(force = false): Promise<string> {
     doctorReport(config),
     "",
     "Next steps:",
-    "1. Run `codex login`, `gemini`, and/or `claude` in a normal terminal to complete local CLI account login.",
+    "1. Run `codex login`, `gemini`, `claude`, `grok`, and/or `cursor-agent` in a normal terminal to complete local CLI account login.",
     "2. Put TELEGRAM_BOT_TOKEN and DISCORD_BOT_TOKEN in `.env`, your shell, or a `VISER_ENV` file if you want messaging.",
     "3. Confirm env/token loading without leaking secrets: `node src/index.ts env-check`.",
     "4. Verify provider runtime and live connector tokens with `node src/index.ts provider-guide --probe` or `node src/index.ts verify --live --probe-all-providers`.",
@@ -41,7 +41,7 @@ export async function setupReport(force = false): Promise<string> {
     "9. Start safe foreground gateway with `node src/index.ts gateway` only after the rehearsal passes; direct gateway now validates live connector tokens and runs the live provider-proof gate by default.",
     "10. For launchd, use `node src/index.ts service plist` / `service install`; the generated service runs `service-run --live --probe-all-providers` and avoids restart loops when preflight is blocked.",
     "11. For CLI-only use now, run `node src/index.ts chat` or `node src/index.ts ask \"질문\"`.",
-    "12. Store durable preferences with `/remember ... #tag` before expecting long-term personalization.",
+    "12. Store always-on persona values with `/global set tone ...` and durable facts with `/remember ... #tag`.",
     "13. Run `node src/index.ts next-steps --live --probe-all-providers` anytime for an actionable recovery/launch checklist."
   ].join("\n");
 }

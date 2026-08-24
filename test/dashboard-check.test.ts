@@ -136,6 +136,7 @@ function testConfig(dir: string): ViserConfig {
     assistant: { ...DEFAULT_CONFIG.assistant, defaultProvider: "echo", fallbackProviders: [], workdir: dir },
     storage: { dir: join(dir, "storage") },
     memory: { ...DEFAULT_CONFIG.memory, dir: join(dir, "memory") },
+    globals: { ...DEFAULT_CONFIG.globals, dir: join(dir, "globals") },
     skills: { ...DEFAULT_CONFIG.skills, dirs: [join(dir, "skills")], promptLimit: 8 },
     plugins: { ...DEFAULT_CONFIG.plugins, dirs: [join(dir, "plugins")], promptLimit: 8 },
     tools: { ...DEFAULT_CONFIG.tools, allowedReadRoots: [dir] },

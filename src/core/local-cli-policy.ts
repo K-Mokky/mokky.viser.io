@@ -16,7 +16,9 @@ export interface CoreLocalCliRoute {
 export const CORE_LOCAL_CLI_ROUTES: CoreLocalCliRoute[] = [
   { label: "GPT/Codex", ids: ["codex", "gpt"], expectedCommand: "codex" },
   { label: "Gemini", ids: ["gemini"], expectedCommand: "gemini" },
-  { label: "Claude", ids: ["claude"], expectedCommand: "claude" }
+  { label: "Claude", ids: ["claude"], expectedCommand: "claude" },
+  { label: "Grok", ids: ["grok"], expectedCommand: "grok" },
+  { label: "Cursor", ids: ["cursor"], expectedCommand: "cursor-agent" }
 ];
 
 export function commandBasename(command: string): string {

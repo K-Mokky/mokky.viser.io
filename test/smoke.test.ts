@@ -64,6 +64,7 @@ function smokeConfig(dir: string): ViserConfig {
     assistant: { ...DEFAULT_CONFIG.assistant, workdir: dir },
     storage: { dir: join(dir, ".viser") },
     memory: { ...DEFAULT_CONFIG.memory, dir: join(dir, ".viser", "memory") },
+    globals: { ...DEFAULT_CONFIG.globals, dir: join(dir, ".viser", "globals") },
     skills: { ...DEFAULT_CONFIG.skills, dirs: [join(dir, "skills"), join(dir, ".viser", "skills")] },
     plugins: { ...DEFAULT_CONFIG.plugins, dirs: [join(dir, "plugins"), join(dir, ".viser", "plugins")] },
     tools: { ...DEFAULT_CONFIG.tools, allowedReadRoots: [dir] },

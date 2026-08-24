@@ -26,6 +26,7 @@ test("onboard prepares first-run files and prints a beginner 3-step guide", asyn
     assert.match(stdout, /node src\/index.ts verify/);
     assert.match(stdout, /node src\/index.ts chat/);
     assert.match(stdout, /codex login/);
+    assert.match(stdout, /cursor-agent/);
     assert.match(stdout, /SECURITY\.md/);
   } finally {
     await rm(dir, { recursive: true, force: true });

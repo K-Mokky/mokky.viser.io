@@ -54,14 +54,14 @@ export async function onboardReport(config: ViserConfig, options: OnboardOptions
   lines.push(
     installed.length > 0
       ? `  · 로그인할 수 있는 AI: ${installed.map((choice) => choice.command).join(", ")} 가 설치되어 보여요`
-      : "  · AI CLI가 아직 안 보여요 (codex / gemini / claude 중 하나만 있으면 충분해요)"
+      : "  · AI CLI가 아직 안 보여요 (codex / gemini / claude / grok / cursor-agent 중 하나만 있으면 충분해요)"
   );
   lines.push("");
 
   const recommended = installed[0] ?? choices[0];
   lines.push("이제 딱 3가지만 하면 끝나요");
   lines.push("");
-  lines.push("  1) AI 하나에 로그인하세요 (셋 다 필요 없어요, 아무거나 하나면 충분해요)");
+  lines.push("  1) AI 하나에 로그인하세요 (전부 필요 없어요, 아무거나 하나면 충분해요)");
   for (const choice of choices) {
     const mark = choice.installed ? "설치됨" : "미설치";
     lines.push(`       - ${choice.login}    (${choice.label}, ${mark})`);
@@ -85,7 +85,9 @@ function providerChoices(): ProviderChoice[] {
   const labels: Record<string, { login: string; label: string }> = {
     codex: { login: "codex login", label: "OpenAI Codex" },
     gemini: { login: "gemini", label: "Google Gemini" },
-    claude: { login: "claude", label: "Anthropic Claude" }
+    claude: { login: "claude", label: "Anthropic Claude" },
+    grok: { login: "grok", label: "xAI Grok" },
+    "cursor-agent": { login: "cursor-agent", label: "Cursor Agent" }
   };
 
   return CORE_LOCAL_CLI_ROUTES.map((route) => route.expectedCommand)

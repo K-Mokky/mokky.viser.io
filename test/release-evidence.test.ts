@@ -21,7 +21,7 @@ test("releaseEvidenceReport summarizes public release readiness without local pa
     assert.match(report, /\[messenger\] Run `node src\/index\.ts release-evidence --strict --live --probe-all-providers`/);
     assert.match(report, /Objective evidence matrix:/);
     assert.match(report, /\[assistant-core\] OpenClaw\/Hermes-like local CLI assistant core works end-to-end/);
-    assert.match(report, /\[local-cli-no-model-api\] GPT\/Codex, Gemini, and Claude use logged-in local CLIs instead of model API keys/);
+    assert.match(report, /\[local-cli-no-model-api\] GPT\/Codex, Gemini, Claude, Grok, and Cursor use logged-in local CLIs instead of model API keys/);
     assert.match(report, /\[open-source-privacy\] GitHub\/npm public release excludes private runtime state and sensitive personal data/);
     assert.match(report, /\[objective\] GPT\/Codex route uses exact logged-in local codex CLI provider/);
     assert.match(report, /\[security\] prompt guard blocks high-risk injection before provider handoff/);
@@ -82,7 +82,7 @@ test("releaseEvidenceReport can emit safe machine-readable JSON", async () => {
     assert.equal(parsed.safeToPaste, true);
     assert.equal(parsed.creator, "KMokky");
     assert.match(parsed.modelAccessRule, /local CLI/);
-    assert.equal(parsed.package.filesCount, 12);
+    assert.equal(parsed.package.filesCount, 13);
     assert.deepEqual(parsed.verification.proof, { live: false, probeProviders: false, probeAllProviders: false });
     assert.deepEqual(parsed.verification.proofChecks, []);
     assert.ok(parsed.verification.smokeChecks.some((check) => check.status === "pass" && check.area === "security"));
@@ -97,6 +97,7 @@ test("releaseEvidenceReport can emit safe machine-readable JSON", async () => {
     assert.ok(parsed.checks.some((check) => check.status === "pass" && check.area === "package" && /package files include PRIVACY\.md/.test(check.message)));
     assert.ok(parsed.checks.some((check) => check.status === "pass" && check.area === "package" && /package files include CONTRIBUTING\.md/.test(check.message)));
     assert.ok(parsed.checks.some((check) => check.status === "pass" && check.area === "package" && /package files include assets/.test(check.message)));
+    assert.ok(parsed.checks.some((check) => check.status === "pass" && check.area === "package" && /package files include docs/.test(check.message)));
     assert.ok(parsed.checks.some((check) => check.status === "pass" && check.area === "release-ignore" && /\.gitignore excludes \.omx\//.test(check.message)));
     assert.ok(parsed.checks.some((check) => check.status === "pass" && check.area === "release-ignore" && /\.gitignore excludes \.npmrc/.test(check.message)));
     assert.ok(parsed.checks.some((check) => check.status === "pass" && check.area === "release-ignore" && /\.npmignore excludes \.npmrc/.test(check.message)));
@@ -168,7 +169,7 @@ test("releaseEvidence blocks model API keys in public examples", async () => {
       author: "KMokky",
       license: "MIT",
       bin: { viser: "./src/index.ts" },
-      files: [".env.example", "README.md", "SECURITY.md", "PRIVACY.md", "CONTRIBUTING.md", "assets", "config", "plugins", "skills", "src", "tools", "tsconfig.json"]
+      files: [".env.example", "README.md", "SECURITY.md", "PRIVACY.md", "CONTRIBUTING.md", "assets", "config", "docs", "plugins", "skills", "src", "tools", "tsconfig.json"]
     }), "utf8");
     await writeFile(join(rootDir, ".npmignore"), ".viser/\n.omx/\n.env\nviser.config.json\n", "utf8");
     await writeFile(join(rootDir, ".env.example"), "OPENAI_API_KEY=sk-example\nTELEGRAM_BOT_TOKEN=\n", "utf8");
@@ -230,11 +231,15 @@ test("releaseEvidence can include live all-provider local CLI proof", async () =
     await writeProbeCli(binDir, "codex");
     await writeProbeCli(binDir, "gemini");
     await writeProbeCli(binDir, "claude");
+    await writeProbeCli(binDir, "grok");
+    await writeProbeCli(binDir, "cursor-agent");
 
     const config = testConfig(dir);
     config.providers.gpt = { ...config.providers.gpt, env: { PATH: binDir } };
     config.providers.gemini = { ...config.providers.gemini, env: { PATH: binDir } };
     config.providers.claude = { ...config.providers.claude, env: { PATH: binDir } };
+    config.providers.grok = { ...DEFAULT_CONFIG.providers.grok, env: { PATH: binDir } };
+    config.providers.cursor = { ...DEFAULT_CONFIG.providers.cursor, env: { PATH: binDir } };
 
     const result = await releaseEvidence(config, {
       rootDir: process.cwd(),
@@ -272,11 +277,15 @@ test("releaseEvidence surfaces missing configured provider commands during all-p
     await mkdir(binDir, { recursive: true });
     await writeProbeCli(binDir, "codex");
     await writeProbeCli(binDir, "gemini");
+    await writeProbeCli(binDir, "grok");
+    await writeProbeCli(binDir, "cursor-agent");
 
     const config = testConfig(dir);
     config.providers.gpt = { ...config.providers.gpt, env: { PATH: binDir } };
     config.providers.gemini = { ...config.providers.gemini, env: { PATH: binDir } };
     config.providers.claude = { ...config.providers.claude, env: { PATH: binDir } };
+    config.providers.grok = { ...DEFAULT_CONFIG.providers.grok, env: { PATH: binDir } };
+    config.providers.cursor = { ...DEFAULT_CONFIG.providers.cursor, env: { PATH: binDir } };
 
     const result = await releaseEvidence(config, {
       rootDir: process.cwd(),
@@ -378,11 +387,15 @@ test("releaseEvidence marks objective completion proven only when live provider 
     await writeProbeCli(binDir, "codex");
     await writeProbeCli(binDir, "gemini");
     await writeProbeCli(binDir, "claude");
+    await writeProbeCli(binDir, "grok");
+    await writeProbeCli(binDir, "cursor-agent");
 
     const config = testConfig(dir);
     config.providers.gpt = { ...config.providers.gpt, env: { PATH: binDir } };
     config.providers.gemini = { ...config.providers.gemini, env: { PATH: binDir } };
     config.providers.claude = { ...config.providers.claude, env: { PATH: binDir } };
+    config.providers.grok = { ...DEFAULT_CONFIG.providers.grok, env: { PATH: binDir } };
+    config.providers.cursor = { ...DEFAULT_CONFIG.providers.cursor, env: { PATH: binDir } };
     config.connectors.telegram = {
       ...config.connectors.telegram,
       enabled: true,
@@ -440,6 +453,7 @@ function testConfig(dir: string): ViserConfig {
     assistant: { ...DEFAULT_CONFIG.assistant, defaultProvider: "echo", fallbackProviders: [], workdir: dir },
     storage: { dir: join(dir, ".viser") },
     memory: { ...DEFAULT_CONFIG.memory, dir: join(dir, ".viser", "memory") },
+    globals: { ...DEFAULT_CONFIG.globals, dir: join(dir, ".viser", "globals") },
     skills: { ...DEFAULT_CONFIG.skills, dirs: [join(dir, "skills"), join(dir, ".viser", "skills")] },
     tools: { ...DEFAULT_CONFIG.tools, allowedReadRoots: [dir], shell: { ...DEFAULT_CONFIG.tools.shell } },
     scheduler: { ...DEFAULT_CONFIG.scheduler, dir: join(dir, ".viser", "scheduler") },
@@ -482,6 +496,14 @@ function testConfig(dir: string): ViserConfig {
         args: ["-p", "{prompt}"],
         promptMode: "template",
         timeoutMs: 5000
+      },
+      grok: {
+        ...DEFAULT_CONFIG.providers.grok,
+        timeoutMs: 5000
+      },
+      cursor: {
+        ...DEFAULT_CONFIG.providers.cursor,
+        timeoutMs: 5000
       }
     }
   };
@@ -489,7 +511,7 @@ function testConfig(dir: string): ViserConfig {
 
 async function writeProbeCli(binDir: string, name: string): Promise<void> {
   const path = join(binDir, name);
-  await writeFile(path, "#!/bin/sh\nprintf '%s\\n' VISER_OK\n", "utf8");
+  await writeFile(path, "#!/bin/sh\ncat >/dev/null\nprintf '%s\\n' VISER_OK\n", "utf8");
   await chmod(path, 0o755);
 }
 

@@ -12,6 +12,7 @@ workspace directories such as `.viser/`:
 
 - session history and compacted transcripts;
 - long-term memory entries and deterministic profile summaries;
+- operator globals for always-on persona, speech style, personality, and user facts;
 - queued jobs, schedules, access pairing records, action proposals, and backups;
 - service logs and local dashboard state.
 
@@ -35,9 +36,9 @@ Use fake credentials and generic examples such as `/Users/example`,
 
 ## Model access privacy
 
-Viser should not require GPT/Gemini/Claude model HTTP API keys. The configured
+Viser should not require GPT/Gemini/Claude/Grok/Cursor model HTTP API keys. The configured
 core model routes are expected to call already logged-in local CLIs (`codex`,
-`gemini`, `claude`). Release evidence and audit checks reject model API key env
+`gemini`, `claude`, `grok`, `cursor-agent`). Release evidence and audit checks reject model API key env
 names in public examples, active env files, and provider env configuration.
 
 ## Public release checklist

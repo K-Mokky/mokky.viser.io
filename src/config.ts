@@ -30,6 +30,12 @@ export const DEFAULT_CONFIG: ViserConfig = {
     dir: ".viser/memory",
     promptLimit: 12
   },
+  globals: {
+    enabled: true,
+    dir: ".viser/globals",
+    maxValueChars: 1000,
+    maxKeys: 24
+  },
   skills: {
     enabled: true,
     dirs: ["skills", ".viser/skills"],
@@ -146,6 +152,24 @@ export const DEFAULT_CONFIG: ViserConfig = {
       promptMode: "template",
       timeoutMs: 600_000,
       loginHint: "Install Claude Code, then run `claude` once and complete account login."
+    },
+    grok: {
+      id: "grok",
+      label: "Grok through xAI CLI",
+      command: "grok",
+      args: ["--prompt", "{prompt}"],
+      promptMode: "template",
+      timeoutMs: 600_000,
+      loginHint: "Install the official xAI Grok CLI, run `grok` once, and complete account login. Viser uses that logged-in CLI, not an xAI API key."
+    },
+    cursor: {
+      id: "cursor",
+      label: "Cursor Agent CLI",
+      command: "cursor-agent",
+      args: ["--print", "{prompt}"],
+      promptMode: "template",
+      timeoutMs: 600_000,
+      loginHint: "Install Cursor, then run `cursor-agent` once and complete account login. Viser uses that logged-in CLI, not a Cursor API key."
     }
   }
 };
@@ -179,6 +203,7 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Viser
   merged.assistant.workdir = resolve(baseDir, merged.assistant.workdir);
   merged.storage.dir = resolve(baseDir, merged.storage.dir);
   merged.memory.dir = resolve(baseDir, merged.memory.dir);
+  merged.globals.dir = resolve(baseDir, merged.globals.dir);
   merged.skills.dirs = merged.skills.dirs.map((dir) => resolve(baseDir, dir));
   merged.plugins.dirs = merged.plugins.dirs.map((dir) => resolve(baseDir, dir));
   merged.tools.allowedReadRoots = merged.tools.allowedReadRoots.map((dir) => resolve(baseDir, dir));

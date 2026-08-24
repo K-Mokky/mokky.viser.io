@@ -23,6 +23,7 @@
     "PRIVACY.md",
     "CONTRIBUTING.md",
     "assets",
+    "docs",
     "config",
     "plugins",
     "skills",
@@ -85,6 +86,8 @@
     "codex",
     "claude",
     "gemini",
+    "grok",
+    "cursor",
     "discord",
     "telegram"
   ],

@@ -8,7 +8,7 @@ Describe the user-facing change and why it is needed.
       session/memory/job state, real tokens, personal handles, emails, IDs, or
       local filesystem paths.
 - [ ] I preserved Viser's local CLI-only model access boundary for core
-      GPT/Codex, Gemini, and Claude routes (`codex`, `gemini`, `claude`) and did
+      GPT/Codex, Gemini, Claude, Grok, and Cursor routes (`codex`, `gemini`, `claude`, `grok`, `cursor-agent`) and did
       not add model API key or HTTP model-client requirements.
 - [ ] I preserved prompt-injection guard behavior before provider handoff when
       touching prompts, memory, sessions, skills, plugins, or provider routing.

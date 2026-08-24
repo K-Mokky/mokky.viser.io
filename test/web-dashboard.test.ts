@@ -60,6 +60,7 @@ test("web dashboard serves read-only HTML and dashboard JSON without provider ca
     assert.equal(data.capabilities.providerCalls, false);
     assert.equal(schema.properties.schemaVersion.const, 1);
     assert.equal(schema.properties.state.required.includes("plugins"), true);
+    assert.equal(schema.properties.state.required.includes("globals"), true);
     assert.equal(schema.properties.capabilities.properties.writeActions.const, false);
     assert.equal(data.state.jobs.pending, 1);
     assert.equal(JSON.parse(health.body).ok, true);
@@ -137,6 +138,7 @@ function testConfig(dir: string): ViserConfig {
     assistant: { ...DEFAULT_CONFIG.assistant, defaultProvider: "echo", fallbackProviders: [], workdir: dir },
     storage: { dir: join(dir, "storage") },
     memory: { ...DEFAULT_CONFIG.memory, dir: join(dir, "memory") },
+    globals: { ...DEFAULT_CONFIG.globals, dir: join(dir, "globals") },
     skills: { ...DEFAULT_CONFIG.skills, dirs: [join(dir, "skills")], promptLimit: 8 },
     plugins: { ...DEFAULT_CONFIG.plugins, dirs: [join(dir, "plugins")], promptLimit: 8 },
     tools: { ...DEFAULT_CONFIG.tools, allowedReadRoots: [dir] },

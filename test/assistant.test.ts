@@ -192,6 +192,7 @@ function testConfig(dir: string): ViserConfig {
     assistant: { ...DEFAULT_CONFIG.assistant, defaultProvider: "echo", workdir: dir },
     storage: { dir: join(dir, "storage") },
     memory: { ...DEFAULT_CONFIG.memory, dir: join(dir, "memory") },
+    globals: { ...DEFAULT_CONFIG.globals, dir: join(dir, "globals") },
     skills: { ...DEFAULT_CONFIG.skills, dirs: [join(dir, "skills")], promptLimit: 8 },
     plugins: { ...DEFAULT_CONFIG.plugins, dirs: [join(dir, "plugins")], promptLimit: 8 },
     tools: { ...DEFAULT_CONFIG.tools, allowedReadRoots: [dir] },
@@ -395,6 +396,7 @@ test("AssistantRuntime dashboard summarizes operational state without provider c
     assert.equal(data.provider, "echo");
     assert.equal(data.runtime.jobWorker.concurrency, 1);
     assert.equal(data.state.memories.count, 1);
+    assert.equal(data.state.globals.count, 0);
     assert.equal(data.state.plugins.count, 0);
     assert.equal(data.state.schedules.total, 1);
     assert.equal(data.state.schedules.enabledCount, 1);

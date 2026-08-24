@@ -117,6 +117,12 @@ export interface MemoryConfig {
   dir: string;
   promptLimit: number;
 }
+export interface GlobalsConfig {
+  enabled: boolean;
+  dir: string;
+  maxValueChars?: number;
+  maxKeys?: number;
+}
 
 export interface SkillsConfig {
   enabled: boolean;
@@ -183,6 +189,7 @@ export interface ViserConfig {
   assistant: AssistantConfig;
   storage: StorageConfig;
   memory: MemoryConfig;
+  globals: GlobalsConfig;
   skills: SkillsConfig;
   plugins: PluginsConfig;
   tools: ToolsConfig;
@@ -289,6 +296,11 @@ export interface DashboardData {
       enabled: boolean;
       count: number;
     };
+    globals: {
+      enabled: boolean;
+      count: number;
+      keys: string[];
+    };
     skills: {
       enabled: boolean;
       count: number;
@@ -348,6 +360,18 @@ export interface MemoryProfileGroup {
   count: number;
   latestAt?: string;
   entries: MemoryEntry[];
+}
+
+export interface GlobalSetting {
+  key: string;
+  value: string;
+  source: string;
+  updatedAt: string;
+}
+
+export interface GlobalsState {
+  schemaVersion: 1;
+  settings: Record<string, GlobalSetting>;
 }
 
 export interface MemoryProfile {

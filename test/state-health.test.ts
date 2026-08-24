@@ -717,6 +717,7 @@ function stateConfig(dir: string): ViserConfig {
     assistant: { ...DEFAULT_CONFIG.assistant, workdir: dir },
     storage: { dir: join(dir, ".viser") },
     memory: { ...DEFAULT_CONFIG.memory, dir: join(dir, ".viser", "memory") },
+    globals: { ...DEFAULT_CONFIG.globals, dir: join(dir, ".viser", "globals") },
     skills: { ...DEFAULT_CONFIG.skills, dirs: [join(dir, "skills"), join(dir, ".viser", "skills")] },
     tools: { ...DEFAULT_CONFIG.tools, allowedReadRoots: [dir] },
     scheduler: { ...DEFAULT_CONFIG.scheduler, dir: join(dir, ".viser", "scheduler") },

@@ -6,6 +6,8 @@
 // of surfacing later as generic TypeErrors.
 
 import type { PromptMode, ViserConfig } from "./core/types.ts";
+import { CORE_LOCAL_CLI_ROUTES, commandBasename } from "./core/local-cli-policy.ts";
+import { isModelApiKeyEnvKey } from "./core/model-api-policy.ts";
 
 export type ConfigValidationSeverity = "pass" | "warn" | "fail";
 
@@ -45,6 +47,7 @@ export function configValidationItems(config: unknown): ConfigValidationItem[] {
   validateAssistant(config.assistant, config.providers, items);
   validateStorageLike("storage", config.storage, items);
   validateMemory(config.memory, items);
+  validateGlobals(config.globals, items);
   validateSkills(config.skills, items);
   validatePlugins(config.plugins, items);
   validateTools(config.tools, items);
@@ -128,6 +131,30 @@ function validateMemory(value: unknown, items: ConfigValidationItem[]): void {
   requireBoolean(value, "memory.enabled", items);
   requireString(value, "memory.dir", items);
   requirePositiveInteger(value, "memory.promptLimit", items);
+}
+
+function validateGlobals(value: unknown, items: ConfigValidationItem[]): void {
+  if (!section(value, "globals", items)) return;
+  requireBoolean(value, "globals.enabled", items);
+  requireString(value, "globals.dir", items);
+  const maxValueChars = optionalPositiveInteger(value, "globals.maxValueChars", items);
+  if (maxValueChars !== undefined && maxValueChars > 4000) {
+    items.push({
+      severity: "fail",
+      path: "globals.maxValueChars",
+      message: "must be at most 4000",
+      next: "Keep always-on persona values small so they cannot crowd the provider prompt."
+    });
+  }
+  const maxKeys = optionalPositiveInteger(value, "globals.maxKeys", items);
+  if (maxKeys !== undefined && maxKeys > 64) {
+    items.push({
+      severity: "fail",
+      path: "globals.maxKeys",
+      message: "must be at most 64",
+      next: "Keep the always-on globals catalog bounded."
+    });
+  }
 }
 
 function validateSkills(value: unknown, items: ConfigValidationItem[]): void {
@@ -307,7 +334,16 @@ function validateProviders(value: unknown, items: ConfigValidationItem[]): void 
       items.push({ severity: "warn", path: `${path}.id`, message: `differs from provider key '${providerId}'; key is used as the canonical id` });
     }
     optionalString(provider, `${path}.label`, items);
-    requireString(provider, `${path}.command`, items);
+    const command = requireString(provider, `${path}.command`, items);
+    const coreRoute = CORE_LOCAL_CLI_ROUTES.find((route) => route.ids.includes(providerId));
+    if (command && coreRoute && commandBasename(command) !== coreRoute.expectedCommand) {
+      items.push({
+        severity: "fail",
+        path: `${path}.command`,
+        message: `${coreRoute.label} route must use logged-in local ${coreRoute.expectedCommand} CLI`,
+        next: `Keep providers.${providerId}.command as the official ${coreRoute.expectedCommand} CLI, not an HTTP/API wrapper.`
+      });
+    }
     const args = requireStringArray(provider, `${path}.args`, items);
     const promptMode = requireString(provider, `${path}.promptMode`, items);
     if (promptMode && !PROMPT_MODES.has(promptMode as PromptMode)) {
@@ -383,6 +419,13 @@ function validateOptionalStringRecord(value: unknown, path: string, items: Confi
   for (const [key, item] of Object.entries(value)) {
     if (typeof item !== "string") {
       items.push({ severity: "fail", path: `${path}.${key}`, message: "must be a string" });
+    } else if (isModelApiKeyEnvKey(key)) {
+      items.push({
+        severity: "fail",
+        path: `${path}.${key}`,
+        message: "must not contain model API key variables",
+        next: "Use a logged-in local provider CLI instead of model API keys."
+      });
     }
   }
 }

@@ -311,6 +311,19 @@ async function main(): Promise<void> {
     case "remember":
       console.log(await assistant.handle(`/remember ${parsed.positionals.join(" ")}`.trim(), sessionId, { source: "cli" }));
       return;
+    case "global":
+    case "globals":
+    case "persona":
+      console.log(await assistant.handle(`/global ${parsed.positionals.join(" ")}`.trim(), sessionId, { source: "cli" }));
+      return;
+    case "set-global":
+    case "global-set":
+      console.log(await assistant.handle(`/global set ${parsed.positionals.join(" ")}`.trim(), sessionId, { source: "cli" }));
+      return;
+    case "clear-global":
+    case "unset-global":
+      console.log(await assistant.handle(`/global clear ${parsed.positionals.join(" ")}`.trim(), sessionId, { source: "cli" }));
+      return;
     case "tools":
       console.log(await assistant.handle("/tools", sessionId, { source: "cli" }));
       return;
@@ -683,6 +696,9 @@ function globalHelp(): string {
     "  viser profile [tag-limit]",
     "  viser memory-compact [max-entries]",
     "  viser remember \"stable fact #tag\"",
+    "  viser global [list|get <key>|set <key> <value>|clear <key>]",
+    "  viser set-global <key> <value>",
+    "  viser clear-global <key>",
     "  viser tools",
     "  viser tool <tool> <args>",
     "  viser schedule every <duration> \"prompt\"",
@@ -717,8 +733,8 @@ function globalHelp(): string {
     "  viser allow telegram|discord <id> [label]",
     "  viser revoke telegram|discord <id>",
     "  viser login [provider] [--probe]",
-    "  viser ask [--provider codex|gpt|gemini|claude] \"prompt\"",
-    "  viser chat [--provider codex|gpt|gemini|claude]",
+    "  viser ask [--provider codex|gpt|gemini|claude|grok|cursor] \"prompt\"",
+    "  viser chat [--provider codex|gpt|gemini|claude|grok|cursor]",
     "  viser telegram [--unsafe-skip-gate]",
     "  viser discord [--unsafe-skip-gate]",
     "  viser gateway [--dry-run] [--strict] [--unsafe-skip-gate] [--web-dashboard] [--live] [--probe-providers|--probe-all-providers]",
@@ -730,7 +746,7 @@ function globalHelp(): string {
     "  --env          Path to .env file loaded before config (or set VISER_ENV)",
     "",
     "Model access rule:",
-    "  Viser calls logged-in local AI CLIs (codex/claude/gemini), not LLM HTTP APIs."
+    "  Viser calls logged-in local AI CLIs (codex/claude/gemini/grok/cursor-agent), not LLM HTTP APIs."
   ].join("\n");
 }
 

@@ -1,7 +1,7 @@
 # Security Policy
 
 Viser is a local-first assistant runtime. It is designed to call already logged-in
-local AI CLIs (`codex`, `gemini`, `claude`) instead of GPT/Gemini/Claude model
+local AI CLIs (`codex`, `gemini`, `claude`, `grok`, `cursor-agent`) instead of GPT/Gemini/Claude/Grok/Cursor model
 HTTP APIs or model API keys. Please do not file reports or examples that include
 real tokens, `.env` contents, private `.viser/` state, `.omx/` runtime state,
 session transcripts, personal chat identifiers, or other personal data.
@@ -31,14 +31,14 @@ If a secret was exposed, rotate it before sharing the report.
 
 Viser intentionally keeps these boundaries small and auditable:
 
-1. **No model API key path**: core GPT/Codex, Gemini, and Claude routes must use
-   exact local CLI command basenames (`codex`, `gemini`, `claude`). Audit and
+1. **No model API key path**: core GPT/Codex, Gemini, Claude, Grok, and Cursor routes must use
+   exact local CLI command basenames (`codex`, `gemini`, `claude`, `grok`, `cursor-agent`). Audit and
    strict release evidence fail if model API key env names such as
-   `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, or
-   `GOOGLE_GENERATIVE_AI_API_KEY` are present in active/public/provider env
+   `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`,
+   `GOOGLE_GENERATIVE_AI_API_KEY`, `XAI_API_KEY`, or `CURSOR_API_KEY` are present in active/public/provider env
    surfaces.
 2. **Prompt-injection guard**: untrusted user, memory, session, skill, and plugin
-   content is fenced before provider handoff. High-risk instruction override,
+   content is fenced before provider handoff. Operator globals persist persona/style/user facts through `/global` and inject as trusted runtime policy after the safety contract. High-risk instruction override,
    secret exfiltration, approval bypass, hidden HTML/zero-width/bidi control, and
    base64-encoded injection patterns are detected before the local CLI provider
    is invoked.
@@ -61,7 +61,7 @@ Viser intentionally keeps these boundaries small and auditable:
 ## Provider subscription terms and account-ban risk
 
 Viser deliberately uses the official, logged-in provider CLIs (`codex`, `gemini`,
-`claude`) instead of reverse-engineered endpoints, stolen tokens, or
+`claude`, `grok`, `cursor-agent`) instead of reverse-engineered endpoints, stolen tokens, or
 detection-evasion. There is **no ban-circumvention code**, because evading a
 provider's abuse detection is itself a terms-of-service violation and a fast path
 to a ban. Using the sanctioned CLI with your own login is the lowest-risk method,

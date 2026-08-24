@@ -100,9 +100,20 @@ export async function runCommand(options: RunCommandOptions): Promise<RunCommand
       });
     });
 
-    if (options.stdin) child.stdin.end(options.stdin);
+    if (options.stdin) child.stdin.end(options.stdin, () => undefined);
     else child.stdin.end();
+    child.stdin.on("error", (error) => {
+      if (isIgnorableStdinError(error)) return;
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      reject(error);
+    });
   });
+}
+
+function isIgnorableStdinError(error: unknown): boolean {
+  return isNodeError(error) && (error.code === "EPIPE" || error.code === "ERR_STREAM_DESTROYED");
 }
 
 function commandEnv(options: RunCommandOptions): NodeJS.ProcessEnv {

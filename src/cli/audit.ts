@@ -46,6 +46,7 @@ const RELEASE_SCAN_ENTRIES = [
   "SECURITY.md",
   "LICENSE",
   "aimake.md",
+  "docs",
   "config",
   "package.json",
   "package-lock.json",
@@ -131,7 +132,7 @@ const SENSITIVE_RELEASE_PATTERNS: Array<{ id: string; pattern: RegExp; next: str
   },
   {
     id: "public-secret-env-assignment",
-    pattern: /\b(?:OPENAI_API_KEY|ANTHROPIC_API_KEY|GEMINI_API_KEY|GOOGLE_GENERATIVE_AI_API_KEY|GOOGLE_API_KEY|DISCORD_BOT_TOKEN|TELEGRAM_BOT_TOKEN|VISER_PROVIDER_SECRET)\s*[:=]\s*["']?(?!(?:redacted|example|demo|dummy|fake|test|placeholder|your-|secret-token|secret-value|sk-test|sk-should-not|shell-secret|tool-api-key|\[REDACTED|<|\$\{|\.\.\.)\b)[A-Za-z0-9][A-Za-z0-9._:-]{11,}/iu,
+    pattern: /\b(?:OPENAI_API_KEY|ANTHROPIC_API_KEY|GEMINI_API_KEY|GOOGLE_GENERATIVE_AI_API_KEY|GOOGLE_API_KEY|XAI_API_KEY|GROK_API_KEY|CURSOR_API_KEY|DISCORD_BOT_TOKEN|TELEGRAM_BOT_TOKEN|VISER_PROVIDER_SECRET)\s*[:=]\s*["']?(?!(?:redacted|example|demo|dummy|fake|test|placeholder|your-|secret-token|secret-value|sk-test|sk-should-not|shell-secret|tool-api-key|\[REDACTED|<|\$\{|\.\.\.)\b)[A-Za-z0-9][A-Za-z0-9._:-]{11,}/iu,
     next: "Keep real tokens and API keys in private .env files only; public examples must use placeholders."
   }
 ];
@@ -418,7 +419,7 @@ function providerShapeAudit(provider: CliProviderConfig): AuditItem[] {
       severity: "fail",
       area: "provider",
       message: `${provider.id}: provider.env contains model API key variables (${modelApiKeyEnvKeys.join(", ")})`,
-      next: "Remove model API key env values. Viser must call already logged-in local GPT/Gemini/Claude CLIs instead of model HTTP APIs."
+      next: "Remove model API key env values. Viser must call already logged-in local GPT/Gemini/Claude/Grok/Cursor CLIs instead of model HTTP APIs."
     });
   }
 

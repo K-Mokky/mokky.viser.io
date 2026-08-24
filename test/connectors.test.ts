@@ -437,7 +437,5 @@ function discordConfig(): DiscordConnectorConfig {
 }
 
 function hangingFetch(): typeof fetch {
-  return (async (_input: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
-    init?.signal?.addEventListener("abort", () => reject(new Error("aborted")));
-  })) as typeof fetch;
+  return (async () => new Promise<Response>(() => undefined)) as typeof fetch;
 }
