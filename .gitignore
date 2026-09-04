@@ -1,6 +1,9 @@
 # Local runtime state
 .viser/
 .omx/
+.gjc/
+.env.*
+!.env.example
 viser.config.json
 .env
 .npmrc
