@@ -32,6 +32,21 @@ test("AssistantRuntime handles slash commands without provider calls", async () 
   }
 });
 
+test("AssistantRuntime schedules an approval-gated autonomy loop without provider calls", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-test-autonomy-"));
+  try {
+    const provider = new EchoProvider();
+    const assistant = new AssistantRuntime(testConfig(dir), { echo: provider });
+    const text = await assistant.handle("/autonomy", "test:autonomy", { source: "test" });
+    assert.match(text, /Viser autonomy loop/);
+    assert.match(text, /\/curate-skills/);
+    assert.match(await assistant.handle("/schedules", "test:autonomy", { source: "test" }), /\/curate-skills/);
+    assert.equal(provider.prompts.length, 0);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("AssistantRuntime prints MCP client config without provider calls", async () => {
   const dir = await mkdtemp(join(tmpdir(), "viser-test-mcp-client-config-"));
   try {

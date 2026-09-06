@@ -4,6 +4,7 @@
 // User config is JSON and intentionally editable. Validate the merged shape
 // before normalizing paths so mistakes fail with actionable messages instead
 // of surfacing later as generic TypeErrors.
+import { parseDurationMs } from "./core/scheduler.js";
 const PROMPT_MODES = new Set(["stdin", "template", "argument"]);
 const ACCESS_POLICIES = new Set(["pairing", "allowlist", "open"]);
 const LOCAL_WEB_DASHBOARD_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
@@ -65,6 +66,7 @@ function validateAssistant(value, providers, items) {
         });
     }
     requireString(value, "assistant.workdir", items);
+    validateAutonomy(value.autonomy, items);
     if (isPlainObject(providers)) {
         if (defaultProvider && !isPlainObject(providers[defaultProvider])) {
             items.push({
@@ -89,6 +91,42 @@ function validateAssistant(value, providers, items) {
                 });
             }
         }
+    }
+}
+function validateAutonomy(value, items) {
+    if (!section(value, "assistant.autonomy", items))
+        return;
+    requireBoolean(value, "assistant.autonomy.enabled", items);
+    const interval = requireString(value, "assistant.autonomy.interval", items);
+    const command = requireString(value, "assistant.autonomy.command", items);
+    if (interval) {
+        try {
+            const intervalMs = parseDurationMs(interval);
+            if (intervalMs < 60_000) {
+                items.push({
+                    severity: "fail",
+                    path: "assistant.autonomy.interval",
+                    message: "must be at least 1 minute",
+                    next: "Use 1h or 24h so the learning loop cannot spin on every tick."
+                });
+            }
+        }
+        catch {
+            items.push({
+                severity: "fail",
+                path: "assistant.autonomy.interval",
+                message: "must look like 10m, 2h, or 1d",
+                next: "Use a duration of at least 1 minute so learning loops cannot spin forever."
+            });
+        }
+    }
+    if (command && !command.startsWith("/")) {
+        items.push({
+            severity: "fail",
+            path: "assistant.autonomy.command",
+            message: "must be a slash command such as /curate-skills",
+            next: "Keep the autonomy loop on an explicit Viser command, not a free-form provider prompt."
+        });
     }
 }
 function validateStorageLike(path, value, items) {

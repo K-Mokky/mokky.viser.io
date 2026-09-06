@@ -499,6 +499,7 @@ test("env-init CLI writes a template and refuses accidental overwrite", async ()
     const configPath = join(dir, "viser.config.json");
     await writeFile(configPath, `${JSON.stringify(envConfig(dir), null, 2)}\n`, "utf8");
     const cliEnv: NodeJS.ProcessEnv = { ...process.env, VISER_CONFIG: configPath };
+    delete cliEnv.VISER_PROVIDER;
     delete cliEnv.VISER_ENV;
     delete cliEnv.TELEGRAM_BOT_TOKEN;
     delete cliEnv.DISCORD_BOT_TOKEN;
@@ -532,7 +533,7 @@ test("env-init CLI writes a template and refuses accidental overwrite", async ()
   }
 });
 
-test("--env does not generate background service plists through the CLI", async () => {
+test("--env forwards VISER_ENV into generated launchd plists", async () => {
   const dir = await mkdtemp(join(tmpdir(), "viser-cli-env-plist-"));
   try {
     const configPath = join(dir, "viser.config.json");
@@ -573,9 +574,8 @@ test("--env does not generate background service plists through the CLI", async 
       env: cliEnv
     });
 
-    assert.match(stdout, /Viser service plist: disabled/);
-    assert.match(stdout, /foreground terminal window/);
-    assert.doesNotMatch(stdout, /<key>VISER_ENV<\/key>/);
+    assert.match(stdout, /<key>VISER_ENV<\/key>/);
+    assert.match(stdout, /<string>service-run<\/string>/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -632,17 +632,24 @@ function envConfig(dir: string): ViserConfig {
       notion: { ...DEFAULT_CONFIG.connectors.notion, enabled: false, token: undefined, page: undefined, pages: {}, allowedPageIds: [], defaultPageIds: [] },
       obsidian: { ...DEFAULT_CONFIG.connectors.obsidian, enabled: false, vaultDir: undefined, note: undefined, notes: {}, allowedNoteIds: [], defaultNoteIds: [] }
     },
-    providers: {
-      echo: {
-        id: "echo",
-        label: "Echo",
-        command: "node",
-        args: ["-e", "console.log('VISER_OK')"],
-        promptMode: "argument",
-        timeoutMs: 5000
-      }
-    }
+    providers: isolatedEnvProviders({
+      id: "echo",
+      label: "Echo",
+      command: "node",
+      args: ["-e", "console.log('VISER_OK')"],
+      promptMode: "argument",
+      timeoutMs: 5000
+    })
   };
+}
+
+function isolatedEnvProviders(echo: ViserConfig["providers"][string]): ViserConfig["providers"] {
+  const emptyPath = join(tmpdir(), "viser-empty-path");
+  const providers: ViserConfig["providers"] = { echo };
+  for (const [id, provider] of Object.entries(DEFAULT_CONFIG.providers)) {
+    providers[id] = { ...provider, env: { PATH: emptyPath } };
+  }
+  return providers;
 }
 
 function restoreEnv(key: string, value: string | undefined): void {

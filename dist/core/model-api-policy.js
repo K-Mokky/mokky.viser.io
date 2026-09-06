@@ -10,10 +10,12 @@ const MODEL_API_KEY_ENV_KEYS = new Set([
     "GEMINI_API_KEY",
     "GOOGLE_API_KEY",
     "GOOGLE_GENERATIVE_AI_API_KEY",
+    "XAI_API_KEY",
+    "GROK_API_KEY",
     "LLM_API_KEY",
     "MODEL_API_KEY"
 ]);
-const MODEL_API_KEY_ENV_PATTERN = /^(?:OPENAI|ANTHROPIC|CLAUDE|GEMINI|GOOGLE(?:_GENERATIVE_AI)?|LLM|MODEL)[A-Z0-9_]*API[_-]?KEY$/iu;
+const MODEL_API_KEY_ENV_PATTERN = /^(?:OPENAI|ANTHROPIC|CLAUDE|GEMINI|GOOGLE(?:_GENERATIVE_AI)?|XAI|GROK|LLM|MODEL)[A-Z0-9_]*API[_-]?KEY$/iu;
 export function isModelApiKeyEnvKey(key) {
     const normalized = key.trim().toUpperCase();
     return MODEL_API_KEY_ENV_KEYS.has(normalized) || MODEL_API_KEY_ENV_PATTERN.test(normalized);

@@ -9,8 +9,14 @@
     "fallbackProviders": [
       "gemini",
       "claude",
-      "gpt"
-    ]
+      "gpt",
+      "grok"
+    ],
+    "autonomy": {
+      "enabled": true,
+      "interval": "24h",
+      "command": "/curate-skills"
+    }
   },
   "storage": {
     "dir": ".viser"
@@ -551,6 +557,34 @@
       "promptMode": "template",
       "timeoutMs": 600000,
       "loginHint": "Install Claude Code, then run `claude` once and complete account login."
+    },
+    "grok": {
+      "id": "grok",
+      "label": "xAI Grok CLI",
+      "command": "grok",
+      "args": [
+        "-p",
+        "{prompt}",
+        "--permission-mode",
+        "plan"
+      ],
+      "promptMode": "template",
+      "timeoutMs": 600000,
+      "loginHint": "Install the xAI Grok CLI, run `grok login` once, then use this provider."
+    },
+    "xai": {
+      "id": "xai",
+      "label": "Grok through xAI CLI",
+      "command": "grok",
+      "args": [
+        "-p",
+        "{prompt}",
+        "--permission-mode",
+        "plan"
+      ],
+      "promptMode": "template",
+      "timeoutMs": 600000,
+      "loginHint": "Run `grok login`; this alias routes xAI/Grok requests through the logged-in Grok CLI."
     }
   },
   "webDashboard": {

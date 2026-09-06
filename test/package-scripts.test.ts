@@ -41,8 +41,8 @@ test("package scripts expose strict provider-proof verification shortcuts", asyn
   assert.equal(pkg.scripts["preflight:providers"], "node src/index.ts preflight --strict --live --probe-all-providers");
   assert.equal(pkg.scripts["launch-status"], "node src/index.ts launch-status");
   assert.equal(pkg.scripts["gateway:check"], "node src/index.ts gateway --dry-run --strict --live --probe-all-providers");
-  assert.equal(pkg.scripts["service-run"], undefined);
-  assert.equal(pkg.scripts.service, undefined);
+  assert.equal(pkg.scripts["service-run"], "node src/index.ts service-run --live --probe-all-providers");
+  assert.equal(pkg.scripts.service, "node src/index.ts service");
 });
 
 test("package file allowlist excludes private runtime and orchestration state", async () => {
@@ -106,7 +106,7 @@ test("packed npm install exposes a working simple viser command", async () => {
 
     const viser = join(prefix, "bin", process.platform === "win32" ? "viser.cmd" : "viser");
     const { stdout: help } = await execFileAsync(viser, ["--help"], {
-      env: { ...process.env, HOME: home, VISER_ENV: "" },
+      env: { ...process.env, HOME: home, VISER_ENV: "", VISER_CONFIG: "", VISER_PROVIDER: "" },
       cwd: work,
       maxBuffer: 1_000_000
     });
@@ -114,7 +114,7 @@ test("packed npm install exposes a working simple viser command", async () => {
     assert.match(help, /viser setup/);
 
     const { stdout: mcpConfig } = await execFileAsync(viser, ["mcp-client-config", "generic", "--json"], {
-      env: { ...process.env, HOME: home, VISER_ENV: "" },
+      env: { ...process.env, HOME: home, VISER_ENV: "", VISER_CONFIG: "", VISER_PROVIDER: "" },
       cwd: work,
       maxBuffer: 1_000_000
     });

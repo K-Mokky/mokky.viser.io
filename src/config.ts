@@ -37,12 +37,17 @@ export const DEFAULT_CONFIG: ViserConfig = {
   assistant: {
     name: "Viser",
     defaultProvider: "codex",
-    fallbackProviders: ["gemini", "claude", "gpt"],
+    fallbackProviders: ["gemini", "claude", "gpt", "grok"],
     systemPrompt:
       "You are Viser, a local-first CLI assistant created by KMokky. Be concise, practical, and ask before destructive actions.",
     historyLimit: 12,
     maxInputChars: 12_000,
-    workdir: "."
+    workdir: ".",
+    autonomy: {
+      enabled: true,
+      interval: "24h",
+      command: "/curate-skills"
+    }
   },
   storage: {
     dir: ".viser"
@@ -575,6 +580,24 @@ export const DEFAULT_CONFIG: ViserConfig = {
       promptMode: "template",
       timeoutMs: 600_000,
       loginHint: "Install Claude Code, then run `claude` once and complete account login."
+    },
+    grok: {
+      id: "grok",
+      label: "xAI Grok CLI",
+      command: "grok",
+      args: ["-p", "{prompt}", "--permission-mode", "plan"],
+      promptMode: "template",
+      timeoutMs: 600_000,
+      loginHint: "Install the xAI Grok CLI, run `grok login` once, then use this provider."
+    },
+    xai: {
+      id: "xai",
+      label: "Grok through xAI CLI",
+      command: "grok",
+      args: ["-p", "{prompt}", "--permission-mode", "plan"],
+      promptMode: "template",
+      timeoutMs: 600_000,
+      loginHint: "Run `grok login`; this alias routes xAI/Grok requests through the logged-in Grok CLI."
     }
   }
 };
@@ -588,7 +611,7 @@ export async function loadConfig(options: LoadConfigOptions = {}): Promise<Viser
   const baseDir = options.baseDir ?? cwd();
   const configPath = findConfigPath(baseDir, options.configPath);
   if (configPath) await assertNoSymlinkComponentsUnderRoot(configPath, baseDir);
-  const userConfig = configPath ? await readJsonFile<Partial<ViserConfig>>(configPath) : {};
+  const userConfig = configPath ? await readOptionalUserConfig(configPath, Boolean(options.configPath || env.VISER_CONFIG)) : {};
   const merged = deepMerge(DEFAULT_CONFIG, userConfig) as ViserConfig;
 
   assertValidConfig(merged);
@@ -988,6 +1011,15 @@ export function findConfigPath(baseDir: string, explicitPath?: string): string |
   if (pathExistsOrIsSymlink(defaultPath)) return defaultPath;
 
   return undefined;
+}
+
+async function readOptionalUserConfig(configPath: string, required: boolean): Promise<Partial<ViserConfig>> {
+  try {
+    return await readJsonFile<Partial<ViserConfig>>(configPath);
+  } catch (error) {
+    if (!required && isNodeError(error) && error.code === "ENOENT") return {};
+    throw error;
+  }
 }
 
 export function deepMerge<T>(base: T, override: unknown): T {

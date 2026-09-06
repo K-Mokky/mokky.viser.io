@@ -834,7 +834,9 @@ function auditConfig(dir: string): ViserConfig {
       codex: { ...DEFAULT_CONFIG.providers.codex },
       gpt: { ...DEFAULT_CONFIG.providers.gpt },
       gemini: { ...DEFAULT_CONFIG.providers.gemini },
-      claude: { ...DEFAULT_CONFIG.providers.claude }
+      claude: { ...DEFAULT_CONFIG.providers.claude },
+      grok: { ...DEFAULT_CONFIG.providers.grok },
+      xai: { ...DEFAULT_CONFIG.providers.xai }
     }
   };
 }

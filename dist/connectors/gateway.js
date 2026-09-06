@@ -21,6 +21,7 @@ import { startWebDashboard } from "./web-dashboard.js";
 export async function runGateway(config, assistant) {
     const tasks = [];
     const access = new AccessStore(config.access);
+    await assistant.ensureAutonomyLoop();
     if (config.scheduler.enabled) {
         tasks.push(new SchedulerRunner(config.scheduler, assistant, createConnectorNotifier(config)).loop());
     }

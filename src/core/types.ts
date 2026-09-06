@@ -80,6 +80,12 @@ export interface CliProviderConfig {
   loginHint?: string;
 }
 
+export interface AutonomyConfig {
+  enabled: boolean;
+  interval: string;
+  command: string;
+}
+
 export interface AssistantConfig {
   name: string;
   defaultProvider: string;
@@ -88,6 +94,7 @@ export interface AssistantConfig {
   historyLimit: number;
   maxInputChars: number;
   workdir: string;
+  autonomy: AutonomyConfig;
 }
 
 export interface TelegramConnectorConfig {

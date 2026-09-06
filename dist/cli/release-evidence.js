@@ -145,8 +145,8 @@ async function packageReleaseChecks(rootDir, packageJson) {
     const scripts = isRecord(packageJson.scripts) ? packageJson.scripts : {};
     addCheck(checks, "package", scripts.build === "npm run clean && tsc -p tsconfig.build.json && node -e \"require('fs').chmodSync('dist/index.js',0o755)\"", "package build script emits the compiled CLI entry");
     addCheck(checks, "package", scripts.prepare === "npm run build", "package prepare script builds dist for npm link and pack");
-    addCheck(checks, "package", !("service-run" in scripts), "package scripts exclude background service-run");
-    addCheck(checks, "package", !("service" in scripts), "package scripts exclude background service helper");
+    addCheck(checks, "package", scripts["service-run"] === "node src/index.ts service-run --live --probe-all-providers", "package scripts include live provider-proof service-run");
+    addCheck(checks, "package", scripts.service === "node src/index.ts service", "package scripts include native service helper");
     const files = Array.isArray(packageJson.files) ? packageJson.files.filter((item) => typeof item === "string") : [];
     addCheck(checks, "package", files.length > 0, "package files allowlist is present");
     for (const required of REQUIRED_PACKAGE_FILES) {
@@ -181,7 +181,7 @@ async function securityDocumentChecks(rootDir) {
     const security = await readTextIfExists(join(rootDir, "SECURITY.md"));
     const normalized = security.replace(/\s+/gu, " ").trim();
     addCheck(checks, "security-doc", normalized.length > 0, "SECURITY.md is non-empty");
-    addCheck(checks, "security-doc", /local AI CLIs?|local CLI|codex.*gemini.*claude/iu.test(normalized) && /model API keys?|HTTP APIs?/iu.test(normalized), "SECURITY.md documents local CLI model access and no model API key boundary");
+    addCheck(checks, "security-doc", /local AI CLIs?|local CLI|codex.*gemini.*claude.*grok|codex.*gemini.*claude/iu.test(normalized) && /model API keys?|HTTP APIs?/iu.test(normalized), "SECURITY.md documents local CLI model access and no model API key boundary");
     addCheck(checks, "security-doc", /prompt-?injection|instruction override|base64|zero-width|bidi/iu.test(normalized), "SECURITY.md documents prompt-injection defenses");
     addCheck(checks, "security-doc", /TELEGRAM_BOT_TOKEN|DISCORD_BOT_TOKEN|SIGNAL_CLI_ACCOUNT|WHATSAPP_ACCESS_TOKEN|WHATSAPP_VERIFY_TOKEN|LINE_CHANNEL_ACCESS_TOKEN|LINE_CHANNEL_SECRET|KAKAOTALK_SKILL_TOKEN|WEBEX_ACCESS_TOKEN|ZULIP_API_KEY|\.env|personal data|private \.viser|\.omx/iu.test(normalized), "SECURITY.md tells reporters not to disclose tokens or private state");
     return checks;
@@ -197,7 +197,7 @@ async function githubTemplateChecks(rootDir) {
     const prText = pullRequest.replace(/\s+/gu, " ").trim();
     addCheck(checks, "github-template", /\.env|\.viser|\.omx|TELEGRAM_BOT_TOKEN|DISCORD_BOT_TOKEN|SIGNAL_CLI_ACCOUNT|WHATSAPP_ACCESS_TOKEN|WHATSAPP_VERIFY_TOKEN|LINE_CHANNEL_ACCESS_TOKEN|LINE_CHANNEL_SECRET|KAKAOTALK_SKILL_TOKEN|WEBEX_ACCESS_TOKEN|ZULIP_API_KEY|local filesystem paths|personal handles|emails?/iu.test(bugText), "GitHub bug report template warns against private data disclosure");
     addCheck(checks, "github-template", /fake credentials|redact|removed real tokens|no real secrets/iu.test(bugText), "GitHub bug report template requires fake or redacted credentials");
-    addCheck(checks, "github-template", /local CLI-only|local CLI|codex.*gemini.*claude/iu.test(prText) && /model API key|HTTP model-client|HTTP model client/iu.test(prText), "GitHub PR template preserves local CLI/no model API boundary");
+    addCheck(checks, "github-template", /local CLI-only|local CLI|codex.*gemini.*claude.*grok|codex.*gemini.*claude/iu.test(prText) && /model API key|HTTP model-client|HTTP model client/iu.test(prText), "GitHub PR template preserves local CLI/no model API boundary");
     addCheck(checks, "github-template", /npm test|typecheck|audit|release-evidence|npm pack --dry-run/iu.test(prText), "GitHub PR template lists release verification commands");
     addCheck(checks, "github-template", /\.env|\.viser|\.omx|real tokens|personal handles|local filesystem paths/iu.test(prText), "GitHub PR template tells contributors not to include private data");
     return checks;
@@ -207,7 +207,7 @@ async function contributingDocumentChecks(rootDir) {
     const contributing = await readTextIfExists(join(rootDir, "CONTRIBUTING.md"));
     const normalized = contributing.replace(/\s+/gu, " ").trim();
     addCheck(checks, "contributing-doc", normalized.length > 0, "CONTRIBUTING.md is non-empty");
-    addCheck(checks, "contributing-doc", /local AI CLIs?|local CLI|codex|gemini|claude/iu.test(normalized) && /model API keys?|HTTP APIs?/iu.test(normalized), "CONTRIBUTING.md tells contributors to preserve local CLI model access");
+    addCheck(checks, "contributing-doc", /local AI CLIs?|local CLI|codex|gemini|claude|grok/iu.test(normalized) && /model API keys?|HTTP APIs?/iu.test(normalized), "CONTRIBUTING.md tells contributors to preserve local CLI model access");
     addCheck(checks, "contributing-doc", /\.env|\.viser|\.omx|tokens?|personal handles|emails?|local filesystem paths/iu.test(normalized), "CONTRIBUTING.md tells contributors not to commit private data");
     addCheck(checks, "contributing-doc", /npm test|typecheck|audit|release-evidence/iu.test(normalized), "CONTRIBUTING.md lists required verification commands");
     return checks;
@@ -424,16 +424,16 @@ function objectiveMatrix(input) {
             remaining: []
         },
         {
-            id: "foreground-only-runtime",
+            id: "always-on-runtime",
             status: allChecksPass(input.checks, [
-                /package scripts exclude background service-run/u,
-                /package scripts exclude background service helper/u
-            ]) && allSmokePass(input.smokeChecks, ["jobs", "scheduler"]) ? "pass" : "fail",
-            requirement: "Honor the explicit no-background-service constraint while keeping the foreground gateway useful",
+                /package scripts include live provider-proof service-run/u,
+                /package scripts include native service helper/u
+            ]) && allSmokePass(input.smokeChecks, ["jobs", "scheduler", "autonomy"]) ? "pass" : "fail",
+            requirement: "Keep an always-on native service path behind the live provider-proof gate",
             evidence: [
-                "package scripts do not expose service/service-run background startup",
-                "service-run and service artifact generation are disabled by service tests",
-                "local smoke proves the foreground runtime can still use jobs and scheduler state"
+                "package scripts expose service/service-run after the live provider-proof gate",
+                "service-run starts the gateway only after preflight; blocked gates exit 0 to avoid launchd restart loops",
+                "local smoke proves jobs, scheduler, and the approval-gated autonomy loop"
             ],
             remaining: []
         },
@@ -569,14 +569,15 @@ function objectiveMatrix(input) {
                 /GPT\/Codex route uses exact logged-in local codex CLI provider/u,
                 /Gemini route uses exact logged-in local gemini CLI provider/u,
                 /Claude route uses exact logged-in local claude CLI provider/u,
+                /Grok\/xAI route uses exact logged-in local grok CLI provider/u,
                 /\.env\.example excludes model API key variables/u,
                 /config example provider env excludes model API key variables/u
             ]) && !providerProofFailed && input.verifyResult.audit.failCount === 0
                 ? "pass"
                 : "fail",
-            requirement: "GPT/Codex, Gemini, and Claude use logged-in local CLIs instead of model API keys",
+            requirement: "GPT/Codex, Gemini, Claude, and Grok/xAI use logged-in local CLIs instead of model API keys",
             evidence: [
-                "core GPT/Codex, Gemini, and Claude routes use exact local command basenames: codex, gemini, claude",
+                "core GPT/Codex, Gemini, Claude, and Grok/xAI routes use exact local command basenames: codex, gemini, claude, grok",
                 `audit: ${input.verifyResult.audit.verdict} (${input.verifyResult.audit.passCount} pass, ${input.verifyResult.audit.warnCount} warn, ${input.verifyResult.audit.failCount} fail)`,
                 "public examples exclude model API key variables",
                 ...(providerProbeRequested

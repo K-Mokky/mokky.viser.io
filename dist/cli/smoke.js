@@ -379,6 +379,16 @@ export async function localSmoke(config, options = {}) {
             expectIncludes(prompt, "ai.tone: concise Korean haeyo style");
             expectIncludes(prompt, "question.context: clarify missing assumptions before long answers");
         });
+        await step(items, "autonomy", "approval-gated Hermes-style learning loop is scheduled without calling a provider", async () => {
+            const callsBefore = smokeProvider.calls;
+            const report = await assistant.handle("/autonomy", sessionId, { source: "test" });
+            expectIncludes(report, "Viser autonomy loop");
+            expectIncludes(report, "/curate-skills");
+            expectIncludes(await assistant.handle("/schedules", sessionId, { source: "test" }), "/curate-skills");
+            if (smokeProvider.calls !== callsBefore) {
+                throw new Error("Autonomy loop scheduling should not call a provider.");
+            }
+        });
         await step(items, "tools", "explicit read-only local tool can read allowed files", async () => {
             expectIncludes(await assistant.handle("/tool read-file seed.txt", sessionId, { source: "test" }), "SMOKE_SEED");
         });
@@ -1691,7 +1701,8 @@ async function createSmokeConfig(config, artifactDir) {
             defaultProvider: "smoke",
             fallbackProviders: [],
             historyLimit: 8,
-            workdir: workspace
+            workdir: workspace,
+            autonomy: { ...config.assistant.autonomy, enabled: true, interval: "24h", command: "/curate-skills" }
         },
         storage: { dir: join(state, "storage") },
         memory: { ...config.memory, enabled: true, dir: join(state, "memory"), promptLimit: 8 },

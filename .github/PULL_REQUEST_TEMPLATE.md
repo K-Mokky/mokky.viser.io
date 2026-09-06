@@ -8,15 +8,14 @@ Describe the user-facing change and why it is needed.
       session/memory/job state, real tokens, personal handles, emails, IDs, or
       local filesystem paths.
 - [ ] I preserved Viser's local CLI-only model access boundary for core
-      GPT/Codex, Gemini, and Claude routes (`codex`, `gemini`, `claude`) and did
+      GPT/Codex, Gemini, Claude, and Grok/xAI routes (`codex`, `gemini`, `claude`, `grok`) and did
       not add model API key or HTTP model-client requirements.
 - [ ] I preserved prompt-injection guard behavior before provider handoff when
       touching prompts, memory, sessions, skills, plugins, or provider routing.
 - [ ] I kept mutation behind approval-gated `/propose` + approval flows.
 - [ ] I used fake credentials and generic examples in docs/tests.
-- [ ] I did not reintroduce background service install/start/service-run behavior
-      or service artifact generator/install helper exports; Viser must start
-      only from a foreground terminal command.
+- [ ] Native always-on service install stays behind the live provider-proof gate
+      (`viser service install` / `viser service-run`); I did not add a hidden model API path.
 
 ## Verification
 

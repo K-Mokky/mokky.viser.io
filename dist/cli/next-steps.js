@@ -48,7 +48,7 @@ export async function nextStepsReport(config, options = {}) {
         "   - Live provider-proof foreground gateway: `viser gateway`",
         "   - Explicit live provider-proof foreground gateway: `viser gateway --strict --live --probe-all-providers`",
         "   - Unsafe raw foreground gateway for debugging only: `viser gateway --unsafe-skip-gate`",
-        "   - Legacy service cleanup only: `viser service status` / `viser service uninstall`"
+        "   - Always-on native service after live provider-proof gate: `viser service install`"
     ].join("\n");
 }
 function providerSteps(config, readiness, options) {

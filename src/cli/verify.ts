@@ -165,6 +165,8 @@ function recommendedCommands(readiness: ReadinessItem[], audit: AuditItem[]): st
   }
 
   commands.add("viser gateway --strict --live --probe-all-providers");
+  commands.add("viser service-run --live --probe-all-providers");
+  commands.add("viser service install");
   commands.add("viser backup");
   commands.add("viser release-evidence");
   return [...commands];

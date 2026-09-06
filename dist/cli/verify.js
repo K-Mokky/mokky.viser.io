@@ -127,6 +127,8 @@ function recommendedCommands(readiness, audit) {
         commands.add("edit viser.config.json, then rerun viser audit");
     }
     commands.add("viser gateway --strict --live --probe-all-providers");
+    commands.add("viser service-run --live --probe-all-providers");
+    commands.add("viser service install");
     commands.add("viser backup");
     commands.add("viser release-evidence");
     return [...commands];

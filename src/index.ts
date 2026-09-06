@@ -23,7 +23,7 @@ import { writeExampleConfig } from "./cli/init.ts";
 import { nextStepsReport } from "./cli/next-steps.ts";
 import { preflight } from "./cli/preflight.ts";
 import { setupReport } from "./cli/setup.ts";
-import { backgroundServiceDisabledMessage, serviceCommand } from "./cli/service.ts";
+import { serviceCommand, trimServiceLogs } from "./cli/service.ts";
 import { localSmoke } from "./cli/smoke.ts";
 import { stateHealthReport } from "./cli/state-health.ts";
 import { readinessReport } from "./cli/readiness.ts";
@@ -396,6 +396,11 @@ async function main(): Promise<void> {
     case "swarm":
       console.log(await assistant.handle(`/team ${parsed.positionals.join(" ")}`.trim(), sessionId, { source: "cli", providerId }));
       return;
+    case "autonomy":
+    case "auto-loop":
+    case "self-improve":
+      console.log(await assistant.handle("/autonomy", sessionId, { source: "cli" }));
+      return;
     case "fix-loop":
     case "review-loop":
     case "autofix":
@@ -453,7 +458,24 @@ async function main(): Promise<void> {
       return;
     case "service-run":
     case "gateway-service": {
-      console.log(backgroundServiceDisabledMessage(parsed.command));
+      try {
+        const trims = await trimServiceLogs(config);
+        for (const trim of trims.filter((item) => item.trimmed)) {
+          console.log(`Viser service log trimmed: ${trim.path} (${trim.bytesBefore} -> ${trim.bytesAfter} bytes)`);
+        }
+      } catch (error) {
+        console.error(`Viser service log maintenance failed; continuing startup: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      const gate = await preflight(config, {
+        ...providerProofLaunchReadinessOptions(parsed.flags),
+        strict: true
+      });
+      console.log(gate.report);
+      if (!gate.ok) {
+        console.log("Viser service-run: blocked by preflight; exiting 0 to avoid a launchd restart loop.");
+        return;
+      }
+      await runGateway(config, assistant);
       return;
     }
     case "service":
@@ -876,6 +898,7 @@ function globalHelp(): string {
     "  viser team \"task\"",
     "  viser fix-loop \"task\"",
     "  viser supervise \"task\"",
+    "  viser autonomy",
     "  viser jobs [pending|running|done|failed|cancelled]",
     "  viser run-jobs [limit] [--parallel <1-6>] [--unsafe-skip-gate]",
     "  viser job-worker [--parallel <1-6>] [--unsafe-skip-gate]",
@@ -894,14 +917,15 @@ function globalHelp(): string {
     "  viser reject <id>",
     "  viser delete-action <id>",
     "  viser scheduler [--unsafe-skip-gate]",
-    "  viser service status|stop|uninstall|logs|health|trim-logs",
+    "  viser service-run [--live] [--probe-providers|--probe-all-providers]",
+    "  viser service plist|write-plist|systemd|write-systemd|windows|write-windows|check|install|reinstall|uninstall|status|start|stop|restart|logs|health|trim-logs",
     "  viser pair-code telegram|discord|slack|matrix|signal|imessage|whatsapp|line|kakaotalk|google-chat|webhook|home-assistant|teams|mattermost|synology-chat|rocket-chat|feishu|dingtalk|wecom|zalo|irc|twitch|ntfy|mastodon|nextcloud-talk|webex|zulip|email|github|todoist|notion|obsidian [label]",
     "  viser access",
     "  viser allow telegram|discord|slack|matrix|signal|imessage|whatsapp|line|kakaotalk|google-chat|webhook|home-assistant|teams|mattermost|synology-chat|rocket-chat|feishu|dingtalk|wecom|zalo|irc|twitch|ntfy|mastodon|nextcloud-talk|webex|zulip|email|github|todoist|notion|obsidian <id> [label]",
     "  viser revoke telegram|discord|slack|matrix|signal|imessage|whatsapp|line|kakaotalk|google-chat|webhook|home-assistant|teams|mattermost|synology-chat|rocket-chat|feishu|dingtalk|wecom|zalo|irc|twitch|ntfy|mastodon|nextcloud-talk|webex|zulip|email|github|todoist|notion|obsidian <id>",
     "  viser login [provider] [--probe]",
-    "  viser ask [--provider codex|gpt|gemini|claude] [--stream] \"prompt\"",
-    "  viser chat [--provider codex|gpt|gemini|claude] [--stream]",
+    "  viser ask [--provider codex|gpt|gemini|claude|grok|xai] [--stream] \"prompt\"",
+    "  viser chat [--provider codex|gpt|gemini|claude|grok|xai] [--stream]",
     "  viser voice [--propose-speak] [--max-turns 50] < transcript-lines.txt",
     "  viser telegram [--unsafe-skip-gate]",
     "  viser discord [--unsafe-skip-gate]",
@@ -921,7 +945,7 @@ function globalHelp(): string {
     "  --env          Path to .env file loaded before config (or set VISER_ENV)",
     "",
     "Model access rule:",
-    "  Viser calls logged-in local AI CLIs (codex/claude/gemini), not LLM HTTP APIs."
+    "  Viser calls logged-in local AI CLIs (codex/claude/gemini/grok), not LLM HTTP APIs."
   ].join("\n");
 }
 
@@ -945,7 +969,7 @@ async function firstRunSetupReport(): Promise<string> {
     "",
     await setupReport(false),
     "",
-    "First-run setup is complete. Review `.env` for tokens or provider choices, then run `viser` in a terminal window to start the foreground runtime."
+    "First-run setup is complete. Review `.env` for tokens or provider choices, then run `viser` to start immediately or `viser service install` to keep it always-on after the live provider-proof gate."
   ].join("\n");
 }
 

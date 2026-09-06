@@ -268,8 +268,8 @@ async function packageReleaseChecks(rootDir: string, packageJson: PackageShape |
   const scripts = isRecord(packageJson.scripts) ? packageJson.scripts : {};
   addCheck(checks, "package", scripts.build === "npm run clean && tsc -p tsconfig.build.json && node -e \"require('fs').chmodSync('dist/index.js',0o755)\"", "package build script emits the compiled CLI entry");
   addCheck(checks, "package", scripts.prepare === "npm run build", "package prepare script builds dist for npm link and pack");
-  addCheck(checks, "package", !("service-run" in scripts), "package scripts exclude background service-run");
-  addCheck(checks, "package", !("service" in scripts), "package scripts exclude background service helper");
+  addCheck(checks, "package", scripts["service-run"] === "node src/index.ts service-run --live --probe-all-providers", "package scripts include live provider-proof service-run");
+  addCheck(checks, "package", scripts.service === "node src/index.ts service", "package scripts include native service helper");
 
   const files = Array.isArray(packageJson.files) ? packageJson.files.filter((item): item is string => typeof item === "string") : [];
   addCheck(checks, "package", files.length > 0, "package files allowlist is present");
@@ -314,7 +314,7 @@ async function securityDocumentChecks(rootDir: string): Promise<ReleaseEvidenceC
   addCheck(
     checks,
     "security-doc",
-    /local AI CLIs?|local CLI|codex.*gemini.*claude/iu.test(normalized) && /model API keys?|HTTP APIs?/iu.test(normalized),
+    /local AI CLIs?|local CLI|codex.*gemini.*claude.*grok|codex.*gemini.*claude/iu.test(normalized) && /model API keys?|HTTP APIs?/iu.test(normalized),
     "SECURITY.md documents local CLI model access and no model API key boundary"
   );
   addCheck(
@@ -359,7 +359,7 @@ async function githubTemplateChecks(rootDir: string): Promise<ReleaseEvidenceChe
   addCheck(
     checks,
     "github-template",
-    /local CLI-only|local CLI|codex.*gemini.*claude/iu.test(prText) && /model API key|HTTP model-client|HTTP model client/iu.test(prText),
+    /local CLI-only|local CLI|codex.*gemini.*claude.*grok|codex.*gemini.*claude/iu.test(prText) && /model API key|HTTP model-client|HTTP model client/iu.test(prText),
     "GitHub PR template preserves local CLI/no model API boundary"
   );
   addCheck(
@@ -387,7 +387,7 @@ async function contributingDocumentChecks(rootDir: string): Promise<ReleaseEvide
   addCheck(
     checks,
     "contributing-doc",
-    /local AI CLIs?|local CLI|codex|gemini|claude/iu.test(normalized) && /model API keys?|HTTP APIs?/iu.test(normalized),
+    /local AI CLIs?|local CLI|codex|gemini|claude|grok/iu.test(normalized) && /model API keys?|HTTP APIs?/iu.test(normalized),
     "CONTRIBUTING.md tells contributors to preserve local CLI model access"
   );
   addCheck(
@@ -673,16 +673,16 @@ function objectiveMatrix(input: {
       remaining: []
     },
     {
-      id: "foreground-only-runtime",
+      id: "always-on-runtime",
       status: allChecksPass(input.checks, [
-        /package scripts exclude background service-run/u,
-        /package scripts exclude background service helper/u
-      ]) && allSmokePass(input.smokeChecks, ["jobs", "scheduler"]) ? "pass" : "fail",
-      requirement: "Honor the explicit no-background-service constraint while keeping the foreground gateway useful",
+        /package scripts include live provider-proof service-run/u,
+        /package scripts include native service helper/u
+      ]) && allSmokePass(input.smokeChecks, ["jobs", "scheduler", "autonomy"]) ? "pass" : "fail",
+      requirement: "Keep an always-on native service path behind the live provider-proof gate",
       evidence: [
-        "package scripts do not expose service/service-run background startup",
-        "service-run and service artifact generation are disabled by service tests",
-        "local smoke proves the foreground runtime can still use jobs and scheduler state"
+        "package scripts expose service/service-run after the live provider-proof gate",
+        "service-run starts the gateway only after preflight; blocked gates exit 0 to avoid launchd restart loops",
+        "local smoke proves jobs, scheduler, and the approval-gated autonomy loop"
       ],
       remaining: []
     },
@@ -818,14 +818,15 @@ function objectiveMatrix(input: {
         /GPT\/Codex route uses exact logged-in local codex CLI provider/u,
         /Gemini route uses exact logged-in local gemini CLI provider/u,
         /Claude route uses exact logged-in local claude CLI provider/u,
+        /Grok\/xAI route uses exact logged-in local grok CLI provider/u,
         /\.env\.example excludes model API key variables/u,
         /config example provider env excludes model API key variables/u
       ]) && !providerProofFailed && input.verifyResult.audit.failCount === 0
         ? "pass"
         : "fail",
-      requirement: "GPT/Codex, Gemini, and Claude use logged-in local CLIs instead of model API keys",
+      requirement: "GPT/Codex, Gemini, Claude, and Grok/xAI use logged-in local CLIs instead of model API keys",
       evidence: [
-        "core GPT/Codex, Gemini, and Claude routes use exact local command basenames: codex, gemini, claude",
+        "core GPT/Codex, Gemini, Claude, and Grok/xAI routes use exact local command basenames: codex, gemini, claude, grok",
         `audit: ${input.verifyResult.audit.verdict} (${input.verifyResult.audit.passCount} pass, ${input.verifyResult.audit.warnCount} warn, ${input.verifyResult.audit.failCount} fail)`,
         "public examples exclude model API key variables",
         ...(providerProbeRequested

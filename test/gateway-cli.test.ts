@@ -404,16 +404,16 @@ test("run-jobs forwards bounded parallelism from CLI flags", async () => {
   }
 });
 
-test("service-run is disabled and never starts the background gateway", async () => {
+test("service-run exits cleanly when preflight blocks to avoid launchd restart loops", async () => {
   const dir = await mkdtemp(join(tmpdir(), "viser-service-run-blocked-"));
   try {
     const configPath = await writeCliConfig(dir, ["-e", "process.exit(2)"]);
     const { stdout } = await runViser(["--config", configPath, "service-run", "--probe-all-providers"]);
 
-    assert.match(stdout, /Viser service-run: disabled/);
-    assert.match(stdout, /no longer installs, starts, or runs a background service/);
-    assert.match(stdout, /Start Viser only in a foreground terminal window/);
-    assert.doesNotMatch(stdout, /Viser preflight/);
+    assert.match(stdout, /Viser preflight: BLOCKED/);
+    assert.match(stdout, /live connector token proof: requested/);
+    assert.match(stdout, /blocked by preflight/);
+    assert.match(stdout, /avoid a launchd restart loop/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -438,6 +438,15 @@ async function runViser(args: string[]) {
   });
 }
 
+function testProviders(echo: ViserConfig["providers"][string]): ViserConfig["providers"] {
+  const emptyPath = join(tmpdir(), "viser-empty-path");
+  const providers: ViserConfig["providers"] = { echo };
+  for (const [id, provider] of Object.entries(DEFAULT_CONFIG.providers)) {
+    providers[id] = { ...provider, env: { PATH: emptyPath } };
+  }
+  return providers;
+}
+
 async function writeCliConfig(
   dir: string,
   providerArgs: string[],
@@ -446,7 +455,7 @@ async function writeCliConfig(
   const loopsEnabled = options.loopsEnabled ?? true;
   const config: ViserConfig = {
     ...DEFAULT_CONFIG,
-    assistant: { ...DEFAULT_CONFIG.assistant, defaultProvider: "echo", fallbackProviders: [], workdir: dir },
+    assistant: { ...DEFAULT_CONFIG.assistant, defaultProvider: "echo", fallbackProviders: [], workdir: dir, autonomy: { ...DEFAULT_CONFIG.assistant.autonomy, enabled: false } },
     storage: { dir: join(dir, ".viser") },
     memory: { ...DEFAULT_CONFIG.memory, dir: join(dir, ".viser", "memory") },
     personalization: { ...DEFAULT_CONFIG.personalization, dir: join(dir, ".viser", "personalization") },
@@ -490,17 +499,15 @@ async function writeCliConfig(
       notion: { ...DEFAULT_CONFIG.connectors.notion, enabled: false, token: undefined, page: undefined, pages: {}, allowedPageIds: [], defaultPageIds: [] },
       obsidian: { ...DEFAULT_CONFIG.connectors.obsidian, enabled: false, vaultDir: undefined, note: undefined, notes: {}, allowedNoteIds: [], defaultNoteIds: [] }
     },
-    providers: {
-      echo: {
-        id: "echo",
-        label: "Echo",
-        command: "node",
-        args: providerArgs,
-        promptMode: "argument",
-        timeoutMs: 5000,
-        loginHint: "No login needed for test provider."
-      }
-    }
+    providers: testProviders({
+      id: "echo",
+      label: "Echo",
+      command: "node",
+      args: providerArgs,
+      promptMode: "argument",
+      timeoutMs: 5000,
+      loginHint: "No login needed for test provider."
+    })
   };
   const configPath = join(dir, "viser.config.json");
   await writeFile(configPath, JSON.stringify(config, null, 2), "utf8");

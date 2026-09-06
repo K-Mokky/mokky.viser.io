@@ -30,11 +30,11 @@ test("setup creates first-run files and prints safe provider-proof launch guidan
     assert.match(stdout, /viser env-check/);
     assert.match(stdout, /viser gateway --dry-run --strict --live --probe-all-providers/);
     assert.match(stdout, /viser launch-status/);
-    assert.match(stdout, /Start Viser with `viser` in a foreground terminal window only after the rehearsal passes/);
-    assert.match(stdout, /Background service install\/start\/service-run and artifact generation are disabled/);
+    assert.match(stdout, /keep it always-on with `viser service install`/);
+    assert.match(stdout, /Native launchd\/systemd\/Task Scheduler install is explicit/);
     assert.match(stdout, /viser service uninstall/);
     assert.match(stdout, /VISER_ENV/);
-    assert.doesNotMatch(stdout, /Run `viser gateway` for scheduler \+ messaging/);
+    assert.match(stdout, /grok login/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

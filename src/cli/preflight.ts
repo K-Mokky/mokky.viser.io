@@ -47,7 +47,7 @@ export async function preflight(config: ViserConfig, options: PreflightOptions =
       providerProbeRequested
         ? "- Start Viser only in a foreground terminal when ready: `viser`."
         : "- Direct foreground gateway now adds provider proof by default: `viser`.",
-      "- Background service startup is disabled; the runtime stops when the foreground terminal process exits."
+      "- Native always-on install uses `viser service install` after the live provider-proof gate. The process still stops if that service is uninstalled."
     ].join("\n")
   };
 }

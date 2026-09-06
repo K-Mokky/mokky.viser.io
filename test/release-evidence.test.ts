@@ -24,13 +24,13 @@ test("releaseEvidenceReport summarizes public release readiness without local pa
     assert.match(report, /remaining proof:\n  - none/);
     assert.match(report, /Objective evidence matrix:/);
     assert.match(report, /\[assistant-core\] OpenClaw\/Hermes-like local CLI assistant core works end-to-end/);
-    assert.match(report, /\[foreground-only-runtime\] Honor the explicit no-background-service constraint/);
+    assert.match(report, /\[always-on-runtime\] Keep an always-on native service path behind the live provider-proof gate/);
     assert.match(report, /\[skill-learning\] Hermes-style reusable skill capture exists/);
     assert.match(report, /\[automation-orchestration\] Scheduled automation and bounded parallel work queues/);
     assert.match(report, /\[browser-automation\] Browser automation tasks are available without granting hidden web-control authority to model providers/);
     assert.match(report, /\[performance-envelope\] Performance claims are bounded by measurable local parallelism and repeatable benchmark tooling/);
     assert.match(report, /no equal-or-better performance claim is made without an explicit same-host Hermes\/OpenClaw baseline artifact/);
-    assert.match(report, /\[local-cli-no-model-api\] GPT\/Codex, Gemini, and Claude use logged-in local CLIs instead of model API keys/);
+    assert.match(report, /\[local-cli-no-model-api\] GPT\/Codex, Gemini, Claude, and Grok\/xAI use logged-in local CLIs instead of model API keys/);
     assert.match(report, /\[open-source-privacy\] GitHub\/npm public release excludes private runtime state and sensitive personal data/);
     assert.match(report, /\[objective\] GPT\/Codex route uses exact logged-in local codex CLI provider/);
     assert.match(report, /\[objective\] web dashboard source is present/);
@@ -231,7 +231,7 @@ test("releaseEvidenceReport can emit safe machine-readable JSON", async () => {
     assert.ok(parsed.checks.some((check) => check.status === "pass" && check.area === "package" && /viser CLI bin points to compiled \.\/dist\/index\.js/.test(check.message)));
     assert.ok(parsed.checks.some((check) => check.status === "pass" && check.area === "package" && /compiled dist CLI entry is present/.test(check.message)));
     assert.ok(parsed.checks.some((check) => check.status === "pass" && check.area === "package" && /package prepare script builds dist/.test(check.message)));
-    assert.ok(parsed.checks.some((check) => check.status === "pass" && check.area === "package" && /exclude background service-run/.test(check.message)));
+    assert.ok(parsed.checks.some((check) => check.status === "pass" && check.area === "package" && /include live provider-proof service-run/.test(check.message)));
     assert.ok(parsed.checks.some((check) => check.status === "pass" && check.area === "release-ignore" && /\.gitignore excludes \.omx\//.test(check.message)));
     assert.ok(parsed.checks.some((check) => check.status === "pass" && check.area === "objective" && /web dashboard source/.test(check.message)));
     assert.ok(parsed.checks.some((check) => check.status === "pass" && check.area === "objective" && /MCP stdio server source/.test(check.message)));
@@ -255,7 +255,7 @@ test("releaseEvidenceReport can emit safe machine-readable JSON", async () => {
     assert.ok(parsed.checks.some((check) => check.status === "pass" && check.area === "github-template" && /PR template lists release verification/.test(check.message)));
     assert.ok(parsed.objectiveMatrix.some((item) => item.id === "assistant-core" && item.status === "pass"));
     assert.ok(parsed.objectiveMatrix.some((item) => item.id === "command-usability" && item.status === "pass" && item.evidence.some((evidence) => /node_modules/.test(evidence))));
-    assert.ok(parsed.objectiveMatrix.some((item) => item.id === "foreground-only-runtime" && item.status === "pass"));
+    assert.ok(parsed.objectiveMatrix.some((item) => item.id === "always-on-runtime" && item.status === "pass"));
     assert.ok(parsed.objectiveMatrix.some((item) => item.id === "messenger" && item.status === "pass" && item.remaining.length === 0 && item.evidence.some((evidence) => /optional deployment proof/.test(evidence))));
     assert.ok(parsed.objectiveMatrix.some((item) => item.id === "channel-breadth" && item.status === "pass" && item.remaining.length === 0 && item.evidence.some((evidence) => /does not claim exhaustive parity/.test(evidence))));
     assert.ok(parsed.objectiveMatrix.some((item) => item.id === "local-cli-no-model-api" && item.status === "pass" && item.remaining.length === 0 && item.evidence.some((evidence) => /static route/.test(evidence))));
@@ -483,11 +483,14 @@ test("releaseEvidence can include live all-provider local CLI proof", async () =
     await writeProbeCli(binDir, "codex");
     await writeProbeCli(binDir, "gemini");
     await writeProbeCli(binDir, "claude");
+    await writeProbeCli(binDir, "grok");
 
     const config = testConfig(dir);
     config.providers.gpt = { ...config.providers.gpt, env: { PATH: binDir } };
     config.providers.gemini = { ...config.providers.gemini, env: { PATH: binDir } };
     config.providers.claude = { ...config.providers.claude, env: { PATH: binDir } };
+    config.providers.grok = { ...config.providers.grok, env: { PATH: binDir } };
+    config.providers.xai = { ...config.providers.xai, env: { PATH: binDir } };
 
     const result = await releaseEvidence(config, {
       rootDir: REPO_ROOT,
@@ -544,6 +547,8 @@ test("releaseEvidence surfaces missing configured provider commands during all-p
     config.providers.gpt = { ...config.providers.gpt, env: { PATH: binDir } };
     config.providers.gemini = { ...config.providers.gemini, env: { PATH: binDir } };
     config.providers.claude = { ...config.providers.claude, env: { PATH: binDir } };
+    config.providers.grok = { ...config.providers.grok, env: { PATH: binDir } };
+    config.providers.xai = { ...config.providers.xai, env: { PATH: binDir } };
 
     const result = await releaseEvidence(config, {
       rootDir: REPO_ROOT,
@@ -1161,6 +1166,22 @@ function testConfig(dir: string): ViserConfig {
         label: "Claude Code CLI",
         command: "claude",
         args: ["-p", "{prompt}"],
+        promptMode: "template",
+        timeoutMs: 5000
+      },
+      grok: {
+        id: "grok",
+        label: "xAI Grok CLI",
+        command: "grok",
+        args: ["-p", "{prompt}", "--permission-mode", "plan"],
+        promptMode: "template",
+        timeoutMs: 5000
+      },
+      xai: {
+        id: "xai",
+        label: "Grok through xAI CLI",
+        command: "grok",
+        args: ["-p", "{prompt}", "--permission-mode", "plan"],
         promptMode: "template",
         timeoutMs: 5000
       }

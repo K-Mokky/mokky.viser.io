@@ -321,7 +321,7 @@ function personalizationHelpText(): string {
 const SENSITIVE_KEY_PATTERN = /(?:api[-_. ]?key|token|secret|password|passwd|credential|cookie|session|email|e[-_. ]?mail|phone|address|ssn|resident|주민|토큰|비밀|비밀번호|암호|이메일|전화|주소)/iu;
 
 const SENSITIVE_VALUE_PATTERNS: Array<{ id: string; pattern: RegExp }> = [
-  { id: "model-api-key-env-name", pattern: /\b(?:OPENAI_API_KEY|ANTHROPIC_API_KEY|GEMINI_API_KEY|GOOGLE_GENERATIVE_AI_API_KEY|GOOGLE_API_KEY)\b/iu },
+  { id: "model-api-key-env-name", pattern: /\b(?:OPENAI_API_KEY|ANTHROPIC_API_KEY|GEMINI_API_KEY|GOOGLE_GENERATIVE_AI_API_KEY|GOOGLE_API_KEY|XAI_API_KEY|GROK_API_KEY)\b/iu },
   { id: "private-key-block", pattern: /-----BEGIN [A-Z ]*PRIVATE KEY-----/u },
   { id: "openai-style-key", pattern: /\bsk-(?!test\b|example\b|redacted\b)[A-Za-z0-9_-]{20,}\b/iu },
   { id: "github-token", pattern: /\bgh[pousr]_[A-Za-z0-9_]{30,}\b/iu },

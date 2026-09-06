@@ -23,7 +23,7 @@ import { formatPluginDetail, formatPluginSelection, PluginRegistry } from "./plu
 import { promptGuardDecision, promptSafetyContract, untrustedPromptBlock } from "./prompt-guard.ts";
 import { PROVIDER_FAILURE_PREFIX } from "./provider-output.ts";
 import { SkillRegistry } from "./skills.ts";
-import { ScheduleStore, parseScheduleInput } from "./scheduler.ts";
+import { ScheduleStore, parseDurationMs, parseScheduleInput } from "./scheduler.ts";
 import { ToolRunner } from "./tools.ts";
 import type {
   AssistantCommandResult,
@@ -78,6 +78,8 @@ export interface AssistantRuntimeOptions {
   connectorMessageSenderOptions?: ConnectorMessageSenderOptions;
   runBrowserTask?: ActionStoreOptions["runBrowserTask"];
 }
+
+const AUTONOMY_SESSION_ID = "viser:autonomy";
 
 export class AssistantRuntime {
   private config: ViserConfig;
@@ -141,6 +143,7 @@ export class AssistantRuntime {
       `- session: ${sessionId}`,
       `- provider: ${providerId}`,
       `- fallback providers: ${this.config.assistant.fallbackProviders.join(", ") || "none"}`,
+      `- autonomy: ${this.autonomyStatusLine()}`,
       `- history messages: ${historyCount}`,
       `- long-term memories: ${this.config.memory.enabled ? memoryCount : "disabled"}`,
       `- personalization settings: ${this.config.personalization.enabled ? personalizationCount : "disabled"}`,
@@ -519,6 +522,10 @@ export class AssistantRuntime {
       case "supervisor":
       case "autopilot":
         return { handled: true, text: await this.enqueueSupervisor(argument, sessionId, options) };
+      case "autonomy":
+      case "auto-loop":
+      case "self-improve":
+        return { handled: true, text: await this.autonomyText() };
       case "jobs":
       case "queue":
         return { handled: true, text: await this.jobsText(argument) };
@@ -1056,6 +1063,59 @@ export class AssistantRuntime {
     }
   }
 
+  private autonomyStatusLine(): string {
+    const autonomy = this.config.assistant.autonomy;
+    if (!autonomy.enabled) return "disabled";
+    return `every ${autonomy.interval} ${autonomy.command}`;
+  }
+
+  private async autonomyText(): Promise<string> {
+    const autonomy = this.config.assistant.autonomy;
+    const loop = await this.ensureAutonomyLoop();
+    if (!autonomy.enabled) {
+      return [
+        "Autonomy loop is disabled in config.",
+        "Enable assistant.autonomy.enabled and keep assistant.autonomy.command as an approval-gated slash command such as /curate-skills."
+      ].join("\n");
+    }
+    if (!this.config.scheduler.enabled) {
+      return "Autonomy loop needs scheduler.enabled=true so the learning curator can run on a durable interval.";
+    }
+    return [
+      "Viser autonomy loop",
+      `- enabled: ${autonomy.enabled}`,
+      `- interval: ${autonomy.interval}`,
+      `- command: ${autonomy.command}`,
+      loop.created
+        ? `- scheduled: [${loop.task.id}] next ${loop.task.nextRunAt}`
+        : `- already scheduled: [${loop.task.id}] next ${loop.task.nextRunAt ?? "none"}`,
+      "This loop stages reusable SKILL.md drafts only. File writes still require /approve."
+    ].join("\n");
+  }
+
+  async ensureAutonomyLoop(): Promise<{ task: { id: string; nextRunAt?: string }; created: boolean }> {
+    const autonomy = this.config.assistant.autonomy;
+    const existing = (await this.scheduleStore.list()).find((task) => task.sessionId === AUTONOMY_SESSION_ID);
+    if (!autonomy.enabled || !this.config.scheduler.enabled) {
+      if (existing) await this.scheduleStore.remove(existing.id);
+      return { task: existing ?? { id: "disabled" }, created: false };
+    }
+
+    if (existing) return { task: existing, created: false };
+
+    const intervalMs = parseDurationMs(autonomy.interval);
+    const task = await this.scheduleStore.add({
+      prompt: autonomy.command,
+      sessionId: AUTONOMY_SESSION_ID,
+      source: "cli",
+      enabled: true,
+      intervalMs,
+      nextRunAt: new Date(Date.now() + intervalMs).toISOString(),
+      delivery: { kind: "console" }
+    });
+    return { task, created: true };
+  }
+
   private async unschedule(id: string): Promise<string> {
     if (!id) return "Schedule id is required. Example: /unschedule abc123";
     const removed = await this.scheduleStore.remove(id);
@@ -1291,7 +1351,7 @@ export class AssistantRuntime {
       `${this.config.assistant.name} commands`,
       "- /help: show this help",
       "- /providers: list configured local CLI providers",
-      "- /provider <id>: switch this session to codex, gpt, gemini, or claude",
+      "- /provider <id>: switch this session to codex, gpt, gemini, claude, grok, or xai",
       "  Provider fallback is used only when no explicit --provider or /provider override was requested.",
       "- /login [id]: show account-login instructions for provider CLIs",
       "- /provider-guide [id]: show provider smoke-test and login diagnostics",
@@ -1328,6 +1388,7 @@ export class AssistantRuntime {
       "- /team <task>: queue planner/executor/verifier role jobs for parallel local-CLI review",
       "- /fix-loop <task>: queue a dependency-gated plan→implement→review→fix→verify loop",
       "- /supervise <task>: queue a dependency-gated supervisor workflow with safety, proposal, verification, and release-audit lanes",
+      "- /autonomy: show the Hermes-style approval-gated self-improving learning loop",
       "- /jobs [status]: list queued jobs",
       "- /run-jobs [limit] [--parallel <1-6>]: run pending jobs, optionally with bounded parallel provider calls",
       "- /cancel-job <id>: cancel a pending/running job",

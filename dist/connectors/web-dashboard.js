@@ -1346,7 +1346,7 @@ function webChatHtml(token) {
     </header>
     <section class="card">
       <div class="label">Provider override (optional)</div>
-      <input id="provider" type="text" placeholder="codex, gemini, claude, echo..." autocomplete="off">
+      <input id="provider" type="text" placeholder="codex, gemini, claude, grok, xai, echo..." autocomplete="off">
       <div class="label" style="margin-top:14px">Message</div>
       <textarea id="message" maxlength="${MAX_WEB_CHAT_MESSAGE_CHARS}" placeholder="Ask Viser from your local browser..."></textarea>
       <div class="toolbar">

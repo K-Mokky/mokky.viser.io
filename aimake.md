@@ -3410,3 +3410,10 @@ Verification:
 - Discovered that a globally installed package cannot rely on Node 22 native TypeScript stripping for `.ts` files under `node_modules` (`ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING`).
 - Added a compiled `dist/index.js` package bin, `tsconfig.build.json`, `npm run build`, and `prepare` so `npm link`, git installs, and `npm pack` produce an install-safe `viser` command.
 - Added package-install smoke coverage that packs the tarball, installs it into a temporary prefix, runs `viser --help`, and verifies `mcp-client-config` points at the installed `dist/index.js` entrypoint.
+
+## 2026-09-06 Grok/xAI providers, always-on service, Hermes-style autonomy loop
+
+- Added first-class local CLI providers `grok` and `xai`. Both spawn the logged-in `grok` binary with `-p "{prompt}" --permission-mode plan`. `XAI_API_KEY` / `GROK_API_KEY` are treated as model API keys and rejected.
+- Restored native always-on install: `viser service install` / `service-run` after the live provider-proof gate. Blocked `service-run` still exits 0 to avoid launchd restart loops.
+- Added `assistant.autonomy` (`enabled`, `interval`, `command`). `/autonomy` and gateway startup schedule an approval-gated `/curate-skills` learning loop. File writes still require `/approve`.
+- Default fallback route now includes `grok`. Setup/README/SECURITY/CONTRIBUTING document `grok login` and `viser service install`.

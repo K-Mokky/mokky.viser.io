@@ -10,11 +10,11 @@ Viser는 **API 키로 모델을 호출하지 않고**, 이미 로그인된 로�
 
 라이선스: **MIT**
 
-> 현재 Viser는 로컬-first 개인 비서 런타임으로 바로 실행 가능한 핵심 루프를 갖췄어요. 장기 메모리, user profile 요약, 세션 검색, SKILL.md 스킬, local plugin manifest, MCP stdio server, 명시적 로컬 도구, bounded-parallel durable job queue, dependency-gated team/fix-loop/supervisor workflow, 승인 기반 파일 쓰기/외부 URL 열기/Browser Use Cloud/Browserbase/Firecrawl Interact/local CDP browser task/메일 draft/로컬 TTS/캘린더 import/desktop notification/clipboard/메신저 outbound, transcript 기반 연속 voice loop, 예약 작업, Telegram/Discord/Slack/Matrix/Signal/iMessage/WhatsApp/LINE/KakaoTalk/Google Chat/generic Webhook/Home Assistant/Teams/Mattermost/Synology Chat/Rocket.Chat/Feishu/DingTalk/WeCom/Zalo/IRC/Twitch/ntfy/Mastodon/Nextcloud Talk/Webex/Zulip/Email/GitHub/Todoist/Notion/Obsidian pairing, readiness/audit/provider 진단, prompt guard, 공개 배포 hygiene 점검, 상태 백업, foreground gateway가 포함돼요.
+> 현재 Viser는 로컬-first 개인 비서 런타임으로 바로 실행 가능한 핵심 루프를 갖췄어요. 장기 메모리, user profile 요약, 세션 검색, SKILL.md 스킬, local plugin manifest, MCP stdio server, 명시적 로컬 도구, bounded-parallel durable job queue, dependency-gated team/fix-loop/supervisor workflow, 승인 기반 파일 쓰기/외부 URL 열기/Browser Use Cloud/Browserbase/Firecrawl Interact/local CDP browser task/메일 draft/로컬 TTS/캘린더 import/desktop notification/clipboard/메신저 outbound, transcript 기반 연속 voice loop, 예약 작업, Telegram/Discord/Slack/Matrix/Signal/iMessage/WhatsApp/LINE/KakaoTalk/Google Chat/generic Webhook/Home Assistant/Teams/Mattermost/Synology Chat/Rocket.Chat/Feishu/DingTalk/WeCom/Zalo/IRC/Twitch/ntfy/Mastodon/Nextcloud Talk/Webex/Zulip/Email/GitHub/Todoist/Notion/Obsidian pairing, readiness/audit/provider 진단, prompt guard, 공개 배포 hygiene 점검, 상태 백업, Grok/xAI local CLI provider, Hermes-style `/autonomy` 학습 루프, live provider-proof native always-on service가 포함돼요.
 
 ## 핵심 원칙
 
-- **모델 API 미사용**: GPT/Codex, Gemini, Claude 응답은 로컬 CLI 계정 로그인 상태를 사용해요. `audit`은 핵심 provider route가 `codex`/`gemini`/`claude` CLI 명령인지 확인하고, 활성 `.env`나 provider env에 `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` 같은 model API key 변수가 들어오면 fail로 막아요.
+- **모델 API 미사용**: GPT/Codex, Gemini, Claude, Grok/xAI 응답은 로컬 CLI 계정 로그인 상태를 사용해요. `audit`은 핵심 provider route가 `codex`/`gemini`/`claude`/`grok` CLI 명령인지 확인하고, 활성 `.env`나 provider env에 `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY` 같은 model API key 변수가 들어오면 fail로 막아요.
 - **Provider fallback**: 기본 provider가 실패하면 명시적 override가 없을 때 `fallbackProviders` 순서로 재시도해요.
 - **TypeScript-first + install-safe build**: `src/**/*.ts`가 메인 구현이고, npm package/`npm link`용 `viser` bin은 `dist/index.js`로 빌드돼요. Node 22는 `node_modules` 안의 `.ts` type stripping을 막기 때문에, 배포·전역 설치 경로는 항상 compiled JS를 사용해요.
 - **Python은 보조 도구**: `tools/session_digest.py`는 대화 로그를 사람이 읽기 쉽게 요약해요.
@@ -51,12 +51,13 @@ viser verify
 viser gateway
 ```
 
-AI 답변을 받으려면 사용할 provider CLI를 설치하고 한 번 로그인해 둬야 해요. Viser는 `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY` 같은 모델 API 키를 요구하지 않아요.
+AI 답변을 받으려면 사용할 provider CLI를 설치하고 한 번 로그인해 둬야 해요. Viser는 `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY` 같은 모델 API 키를 요구하지 않아요.
 
 ```bash
 codex login
 gemini      # 첫 실행에서 브라우저 로그인이 열릴 수 있어요.
 claude      # Claude Code 설치 후 interactive login
+grok login  # xAI Grok CLI
 ```
 
 개발/검증까지 하려면 의존성을 설치한 뒤 build/test/typecheck를 돌려요.
@@ -1079,22 +1080,20 @@ viser delete-job <id>
 
 `job-worker`는 foreground loop로 pending job을 계속 처리해요. 시작 시 이전 worker가 남긴 `running` job은 `pending`으로 되돌려 재처리 가능하게 해요. startup recovery나 tick 처리 중 storage/JSON 예외가 나도 오류를 기록하고 다음 tick에서 재시도해 gateway 전체 장애로 번지는 일을 줄여요. Foreground worker loop는 idle 상태의 `No pending jobs` tick 로그를 반복 출력하지 않고, 실제 job 실행/완료/실패와 오류만 기록해요. `jobs.concurrency`가 2 이상이면 한 tick에서 여러 pending job을 provider 호출 단계까지 병렬 처리하고, 상태 반영은 순차적으로 마무리해요. 이 loop도 live provider-proof `preflight`를 통과해야 시작하고, raw 디버그 실행은 `viser job-worker --unsafe-skip-gate` 또는 `npm run job-worker:raw`로 분리했어요. `gateway`를 실행하면 scheduler와 함께 job worker도 같이 실행돼요.
 
-Viser는 백그라운드 서비스로 설치·시작하지 않아요. macOS launchd, Linux systemd, Windows Task Scheduler용 install/start/restart/service-run 경로는 비활성화되어 있고, 사용자가 터미널에서 `viser`를 실행해 둔 동안에만 Discord/Telegram/Slack/Matrix/Signal/iMessage/WhatsApp/LINE/KakaoTalk/Google Chat/generic Webhook/Home Assistant/Teams/Mattermost/Synology Chat/Rocket.Chat/Feishu gateway, scheduler, job worker가 작동해요. 터미널을 닫거나 프로세스를 종료하면 Viser도 멈춰요.
-
-과거 버전에서 설치한 서비스가 남아 있을 수 있으므로, 정리용 명령만 유지해요.
+Viser는 live provider-proof gate를 통과한 뒤 native always-on 서비스로 설치할 수 있어요. macOS launchd, Linux systemd --user, Windows Task Scheduler는 `viser service install`이 명시적으로 실행될 때만 등록돼요. 게이트가 막히면 native unit/plist/task는 복사되지 않아요. `service-run`은 같은 게이트를 다시 통과한 뒤에만 gateway를 시작하고, 실패하면 launchd restart loop를 피하려고 exit 0으로 끝나요.
 
 ```bash
+viser service check
+viser service install
 viser service status
-viser service stop
-viser service uninstall
 viser service logs
 viser service health
 viser service trim-logs
+viser service uninstall
 ```
 
-`service install`, `service start`, `service restart`, `service-run`, service artifact 생성 명령은 더 이상 gateway를 시작하지 않고 disabled 안내만 출력해요. 소스에서도 launchd/systemd/Windows service artifact 생성·설치 helper export를 제거해서 내부 우회 경로가 다시 service file을 만들지 못하게 했어요. 새 실행 경로는 `viser` 또는 개발용 `viser gateway` foreground process예요.
+`gateway`는 scheduler, job worker, autonomy loop, credential이 있는 connector를 한 프로세스에서 함께 실행하는 control plane이에요. 터미널에서 `viser`를 바로 켜도 되고, 재부팅 후에도 유지하려면 `viser service install`을 쓰면 돼요.
 
-`gateway`는 scheduler, job worker, credential이 있는 connector를 한 프로세스에서 함께 실행하는 foreground control plane이에요.
 
 ```bash
 export TELEGRAM_BOT_TOKEN="..."
@@ -1270,7 +1269,7 @@ src/core/scheduler.ts         scheduled automation store and runner
 src/core/jobs.ts              durable provider job queue, dependencies, team/fix-loop workflows
 src/core/actions.ts           approval-gated file, app, and messenger actions
 src/core/access.ts            Telegram/Discord/Slack/Matrix/Signal/iMessage/WhatsApp/LINE/KakaoTalk/Google Chat/generic Webhook/Home Assistant/Teams/Mattermost/Synology Chat/Rocket.Chat/Feishu/DingTalk/WeCom/Zalo/IRC/Twitch/ntfy/Mastodon/Nextcloud Talk/Webex/Zulip/Email/GitHub/Todoist/Notion/Obsidian pairing access control
-src/cli/service.ts            legacy background service cleanup/status/log helpers
+src/cli/service.ts            native launchd/systemd/Task Scheduler always-on service helpers
 src/cli/readiness.ts          executable readiness checklist
 src/core/mcp-client-config.ts local MCP client config snippet generator
 src/connectors/validate.ts    Telegram/Discord/Slack/Matrix/Signal/iMessage/WhatsApp/LINE/Google Chat/generic Webhook/Home Assistant/Teams/Mattermost/Synology Chat/Rocket.Chat/Feishu/DingTalk/WeCom/Zalo/IRC/Twitch/ntfy/Mastodon/Nextcloud Talk/Webex/Zulip credential validation
@@ -1317,10 +1316,10 @@ aimake.md                     제작 과정 기록
 
 ## OpenClaw/Hermes 대비 남은 큰 차이
 
-- Viser는 의도적으로 background service를 지원하지 않아요. Discord/Telegram/Slack/Matrix/Signal/iMessage/WhatsApp/LINE/KakaoTalk/Google Chat/generic Webhook/Home Assistant/Teams/Mattermost/Synology Chat/Rocket.Chat/Feishu/DingTalk/WeCom/Zalo/IRC/Twitch/ntfy/Mastodon/Nextcloud Talk/Webex/Zulip/Email/GitHub/Todoist/Notion/Obsidian bridge, scheduler, job worker는 사용자가 `viser`를 foreground terminal에서 켜 둔 동안에만 작동하고, legacy service 명령은 status/stop/uninstall/log cleanup 용도로만 남아 있어요.
+- Viser는 live provider-proof gate를 통과한 뒤 `viser service install`로 macOS launchd / Linux systemd --user / Windows Task Scheduler 상시 실행을 켤 수 있어요. 게이트가 막히면 native service는 설치되지 않고, `service-run`은 launchd restart loop를 피하려고 exit 0으로 끝나요. Discord/Telegram 등 connector, scheduler, job worker, autonomy loop는 이 always-on 경로와 foreground `viser` 양쪽에서 돌아가요.
 - Telegram/Discord에 더해 Slack Socket Mode/Web API, Matrix Client-Server, 로컬 `signal-cli` 기반 Signal connector, macOS Messages 기반 iMessage connector, WhatsApp Cloud API webhook/send connector, LINE Messaging API webhook/reply/push connector, KakaoTalk Open Builder Skill webhook/reply connector, token/HMAC-protected generic inbound Webhook(text와 bounded attachment metadata/text), Google Chat/Microsoft Teams/Mattermost/Synology Chat/Rocket.Chat/Feishu incoming webhook sender, generic HTTPS webhook sender, Home Assistant REST service-call sender, IRC/Twitch chat sender, ntfy push sender, Mastodon/Fediverse status sender, Webex/Zulip Messages API sender, local sendmail Email sender, GitHub issue/PR comment sender, Todoist task sender, Notion page append sender, Obsidian/local Markdown vault append sender까지 first-class로 구현했어요. 남은 channel breadth 격차는 platform-specific chat surface와 각 connector의 실제 계정 기반 live proof예요.
 - MCP 호환성은 local stdio tools/resources/prompts server와 `mcp-client-config` 기반 local client config export까지 확장했고, plugin ecosystem은 local `plugin.json` manifest registry와 명시적 `/plugin` 실행 경로를 제공해요. OpenClaw식 tool 격차도 줄이기 위해 private/heavy tree를 건너뛰는 guarded `search-files`, DuckDuckGo/SearXNG/Brave/Tavily/Perplexity/Exa/Firecrawl/Ollama provider를 지원하는 guarded `web-search`, JavaScript 없는 cached direct text/markdown 및 Firecrawl scrape-backed guarded `web-fetch`를 CLI `/tool`과 MCP `viser_search_files`/`viser_web_search`/`viser_web_fetch` 양쪽에 추가했고, Browser Use Cloud task creation, Browserbase cloud CDP session, Firecrawl Interact scrape-bound browser session, localhost CDP navigation/snapshot은 숨겨진 provider tool이 아니라 승인 기반 `browser-task` action으로 추가했지만, 원격 MCP marketplace나 provider-backed JS/browser search까지 포함한 완전한 생태계는 아직 아니에요.
-- Hermes식 self-improving loop와 완전히 같지는 않지만, `/learn-skill <id> | <description> | <procedure>`로 작업 중 얻은 절차를 직접 캡처하거나 `/reflect-skill <id> | <description> [| focus]`로 최근 세션을 provider가 요약하게 할 수 있고, `/curate-skills [focus]`는 최근 transcript에서 재사용 가능한 절차를 자동 learning curator가 찾아 approval-gated `SKILL.md` draft로 staging해요. Reflect/curate 경로는 transcript 원문 대신 메시지 수/hash, provider, action id, target, mode만 담은 `reflection-proofs.jsonl` durable proof를 남기고, `/skill-reflections`에서 pending/approved/rejected 상태를 볼 수 있어요. 해당 proof가 `echo`/test provider가 아닌 configured provider에서 생성되고 연결된 write action이 approved 상태이며 target `SKILL.md`가 존재하면, `release-evidence`는 민감한 transcript 없이 provider/mode/message count/procedure bytes만 공개 가능한 skill-learning 증거로 인정해요. 모든 경로는 approval-gated `SKILL.md` write action으로만 저장되고, 승인 후 즉시 `/skills`/`/skill`에서 재사용돼요.
+- Hermes식 self-improving loop는 `/autonomy`로 흡수했어요. 기본값은 `assistant.autonomy.interval=24h`, `assistant.autonomy.command=/curate-skills`이고, 런타임이 durable scheduler에 학습 루프를 올려 최근 세션에서 재사용 가능한 절차를 approval-gated `SKILL.md` draft로 staging해요. `/learn-skill`, `/reflect-skill`, `/curate-skills`는 그대로 수동/반자동 경로예요. 파일 쓰기는 계속 `/approve`가 필요하고, provider lane이 코드를 무승인으로 고치지는 않아요.
 - 실제 Browser Use/Browserbase/Firecrawl API credential/task, localhost CDP browser run, browser microphone/camera/screen 권한·캡처와 로그인된 provider CLI의 native token streaming은 아직 별도 live proof가 필요하지만, 현재는 provider 호출 없는 터미널 dashboard, 같은 상태 모델의 JSON 출력(`dashboard --json`), foreground gateway에 붙일 수 있는 read-only live web dashboard(`/dashboard.events`), 최근 승인·job·스케줄·세션 operator activity stream, snapshot 기반 `<canvas>` overview와 정적 `/dashboard.canvas.svg`, localhost-only WebChat(`/chat.html`), localhost 기본/명시적 원격 opt-in의 token-authenticated persistent collaborative canvas(`/canvas.html`), text/attachment metadata를 받는 token/HMAC-protected generic inbound Webhook(`/webhook/viser`), browser-side microphone transcript capture(`/voice.html`), browser-side camera/screen capture(`/capture.html`), 승인 기반 Browser Use Cloud/Browserbase/Firecrawl Interact/local CDP browser task(`browser-task`), transcript 기반 연속 voice loop(`voice`), bounded provider stdout streaming(`ask --stream`, `chat --stream`), 승인 기반 로컬 TTS `speak` action을 제공해요.
 - 병렬 subagent orchestration은 durable job queue 기반 `/team`/`/swarm` role lanes, dependency-gated synthesizer lane, dependency artifact injection, `/fix-loop` plan→implement→review→fix→verify chain, `/supervise` safety→repo-scout→proposal→verification→release-audit handoff workflow까지 지원해요. 다만 안전을 위해 provider lane이 실제 코드 수정까지 무승인으로 반복 적용하지는 않고, mutation은 `/propose` + `/approve` 경계로 남겨요.
 - 성능은 현재 local smoke에서 bounded parallel job queue와 `benchmark` harness가 검증되고, `viser benchmark --live --save --hermes "... {prompt}" --openclaw "... {prompt}"`로 같은 host/같은 prompt 경쟁 baseline을 붙인 private benchmark artifact를 남길 수 있어요. 다만 실제 Hermes/OpenClaw 실행 결과 artifact는 아직 별도 증거로 붙여야 해요.

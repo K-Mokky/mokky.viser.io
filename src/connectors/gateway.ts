@@ -25,6 +25,7 @@ import type { ViserConfig } from "../core/types.ts";
 export async function runGateway(config: ViserConfig, assistant: AssistantRuntime): Promise<void> {
   const tasks: Promise<void>[] = [];
   const access = new AccessStore(config.access);
+  await assistant.ensureAutonomyLoop();
 
   if (config.scheduler.enabled) {
     tasks.push(new SchedulerRunner(config.scheduler, assistant, createConnectorNotifier(config)).loop());

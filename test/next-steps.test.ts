@@ -22,10 +22,9 @@ test("nextStepsReport gives a launch checklist without running provider probes b
     assert.match(report, /CLI chat: `viser chat`/);
     assert.match(report, /Gateway strict live provider-proof dry-run: `viser gateway --dry-run --strict --live --probe-all-providers`/);
     assert.match(report, /Live provider-proof foreground gateway: `viser gateway`/);
-    assert.doesNotMatch(report, /service-run --live --probe-all-providers/);
+    assert.match(report, /Always-on native service after live provider-proof gate: `viser service install`/);
     assert.match(report, /Explicit live provider-proof foreground gateway: `viser gateway --strict --live --probe-all-providers`/);
     assert.match(report, /Unsafe raw foreground gateway for debugging only: `viser gateway --unsafe-skip-gate`/);
-    assert.match(report, /Legacy service cleanup only/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

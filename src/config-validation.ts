@@ -5,6 +5,7 @@
 // before normalizing paths so mistakes fail with actionable messages instead
 // of surfacing later as generic TypeErrors.
 
+import { parseDurationMs } from "./core/scheduler.ts";
 import type { PromptMode, ViserConfig } from "./core/types.ts";
 
 export type ConfigValidationSeverity = "pass" | "warn" | "fail";
@@ -82,6 +83,7 @@ function validateAssistant(value: unknown, providers: unknown, items: ConfigVali
     });
   }
   requireString(value, "assistant.workdir", items);
+  validateAutonomy(value.autonomy, items);
 
   if (isPlainObject(providers)) {
     if (defaultProvider && !isPlainObject(providers[defaultProvider])) {
@@ -108,6 +110,41 @@ function validateAssistant(value: unknown, providers: unknown, items: ConfigVali
         });
       }
     }
+  }
+}
+
+function validateAutonomy(value: unknown, items: ConfigValidationItem[]): void {
+  if (!section(value, "assistant.autonomy", items)) return;
+  requireBoolean(value, "assistant.autonomy.enabled", items);
+  const interval = requireString(value, "assistant.autonomy.interval", items);
+  const command = requireString(value, "assistant.autonomy.command", items);
+  if (interval) {
+    try {
+      const intervalMs = parseDurationMs(interval);
+      if (intervalMs < 60_000) {
+        items.push({
+          severity: "fail",
+          path: "assistant.autonomy.interval",
+          message: "must be at least 1 minute",
+          next: "Use 1h or 24h so the learning loop cannot spin on every tick."
+        });
+      }
+    } catch {
+      items.push({
+        severity: "fail",
+        path: "assistant.autonomy.interval",
+        message: "must look like 10m, 2h, or 1d",
+        next: "Use a duration of at least 1 minute so learning loops cannot spin forever."
+      });
+    }
+  }
+  if (command && !command.startsWith("/")) {
+    items.push({
+      severity: "fail",
+      path: "assistant.autonomy.command",
+      message: "must be a slash command such as /curate-skills",
+      next: "Keep the autonomy loop on an explicit Viser command, not a free-form provider prompt."
+    });
   }
 }
 

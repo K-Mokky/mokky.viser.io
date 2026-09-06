@@ -22,7 +22,7 @@ test("verify combines readiness and audit into one pass report", async () => {
     assert.match(result.report, /viser launch-status/);
     assert.match(result.report, /viser next-steps --live --probe-all-providers/);
     assert.match(result.report, /viser gateway/);
-    assert.doesNotMatch(result.report, /viser service-run --live --probe-all-providers/);
+    assert.match(result.report, /viser service-run --live --probe-all-providers/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
