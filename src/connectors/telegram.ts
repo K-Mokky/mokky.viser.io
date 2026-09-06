@@ -10,7 +10,7 @@ import { ConnectorRateLimiter, connectorRateLimitMessage } from "./rate-limit.ts
 import { DEFAULT_FETCH_TIMEOUT_MS, fetchWithTimeout, type FetchLike } from "../utils/fetch.ts";
 import { chunkText } from "../utils/text.ts";
 import type { AssistantRuntime } from "../core/assistant.ts";
-import type { TelegramConnectorConfig } from "../core/types.ts";
+import type { AccessConnector, TelegramConnectorConfig } from "../core/types.ts";
 
 const TELEGRAM_RETRY_DELAY_MS = 5000;
 const TELEGRAM_LONG_POLL_MARGIN_MS = 5_000;
@@ -140,15 +140,15 @@ export async function handleTelegramUpdate(
   }
 }
 
-export function pairingRequiredMessage(connector: "telegram" | "discord"): string {
+export function pairingRequiredMessage(connector: AccessConnector): string {
   return [
     "This chat is not paired with Viser yet.",
-    `Run \`node src/index.ts pair-code ${connector}\` on the Viser machine, then send:`,
+    `Run \`viser pair-code ${connector}\` on the Viser machine, then send:`,
     "/pair CODE"
   ].join("\n");
 }
 
-export function pairedMessage(connector: "telegram" | "discord"): string {
+export function pairedMessage(connector: AccessConnector): string {
   return `Paired this ${connector} chat with Viser. You can now send commands.`;
 }
 

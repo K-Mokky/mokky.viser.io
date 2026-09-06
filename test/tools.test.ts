@@ -29,6 +29,605 @@ test("ToolRunner reads only under allowed roots and blocks shell metacharacters"
   }
 });
 
+test("ToolRunner web-fetch reads bounded remote text without JavaScript execution", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-tools-web-fetch-"));
+  try {
+    const requested: string[] = [];
+    const runner = new ToolRunner(testToolsConfig(dir), {
+      lookupImpl: async () => [{ address: "93.184.216.34", family: 4 }],
+      fetchImpl: async (input) => {
+        requested.push(String(input));
+        return new Response("<html><head><script>window.evil=1</script></head><body><h1>Hello &amp; safe</h1><p>Readable web text.</p></body></html>", {
+          status: 200,
+          headers: { "content-type": "text/html; charset=utf-8" }
+        });
+      }
+    });
+
+    const result = await runner.run("web-fetch https://example.com/page 80");
+    const cached = await runner.run("web-fetch https://example.com/page 80");
+    const markdown = await runner.run("web-fetch https://example.com/page 200 markdown");
+
+    assert.equal(result.ok, true);
+    assert.equal(cached.ok, true);
+    assert.equal(markdown.ok, true);
+    assert.deepEqual(requested, ["https://example.com/page", "https://example.com/page"]);
+    assert.match(result.output, /url: https:\/\/example\.com\/page/);
+    assert.match(result.output, /extract-mode: text/);
+    assert.match(result.output, /cache: miss/);
+    assert.match(result.output, /Hello & safe/);
+    assert.match(result.output, /Readable web text/);
+    assert.doesNotMatch(result.output, /window\.evil/);
+    assert.match(cached.output, /cache: hit/);
+    assert.match(markdown.output, /extract-mode: markdown/);
+    assert.match(markdown.output, /# Hello & safe/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("ToolRunner web-fetch can use a configured Firecrawl Scrape API provider", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-tools-web-fetch-firecrawl-"));
+  try {
+    const requested: string[] = [];
+    const seenAuth: string[] = [];
+    const seenBodies: string[] = [];
+    const config = testToolsConfig(dir);
+    config.webFetch = {
+      ...config.webFetch,
+      provider: "firecrawl-api",
+      firecrawlApiKey: "firecrawl-smoke-token"
+    };
+    const runner = new ToolRunner(config, {
+      lookupImpl: async () => [{ address: "93.184.216.34", family: 4 }],
+      fetchImpl: async (input, init) => {
+        requested.push(String(input));
+        seenAuth.push(new Headers(init?.headers).get("authorization") ?? "");
+        seenBodies.push(String(init?.body ?? ""));
+        return new Response(JSON.stringify({
+          success: true,
+          data: {
+            html: "<main><h1>Firecrawl &amp; Page</h1><script>NOPE</script><p>Readable scrape text.</p></main>",
+            metadata: { statusCode: 200 }
+          }
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+    });
+
+    const result = await runner.run("web-fetch https://example.com/page 200");
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(requested, ["https://api.firecrawl.dev/v2/scrape"]);
+    assert.deepEqual(seenAuth, ["Bearer firecrawl-smoke-token"]);
+    assert.deepEqual(seenBodies.map((body) => JSON.parse(body)), [{
+      url: "https://example.com/page",
+      formats: ["html"],
+      onlyMainContent: true,
+      removeBase64Images: true,
+      blockAds: true,
+      timeout: 3000
+    }]);
+    assert.match(result.output, /url: https:\/\/example\.com\/page/);
+    assert.match(result.output, /content-type: text\/html/);
+    assert.match(result.output, /Firecrawl & Page/);
+    assert.match(result.output, /Readable scrape text/);
+    assert.doesNotMatch(result.output, /NOPE/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("ToolRunner web-fetch blocks internal hosts, private DNS results, and unsafe redirects", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-tools-web-fetch-ssrf-"));
+  try {
+    const publicLookup = async () => [{ address: "93.184.216.34", family: 4 }];
+    const privateLookup = async () => [{ address: "127.0.0.1", family: 4 }];
+    const okFetch = async () => new Response("ok", { status: 200, headers: { "content-type": "text/plain" } });
+
+    const localhost = await new ToolRunner(testToolsConfig(dir), { lookupImpl: publicLookup, fetchImpl: okFetch }).run("web-fetch http://localhost:8080");
+    assert.equal(localhost.ok, false);
+    assert.match(localhost.output, /private|internal/i);
+
+    const privateDns = await new ToolRunner(testToolsConfig(dir), { lookupImpl: privateLookup, fetchImpl: okFetch }).run("web-fetch https://intranet.example.com");
+    assert.equal(privateDns.ok, false);
+    assert.match(privateDns.output, /private|internal/i);
+
+    const redirect = await new ToolRunner(testToolsConfig(dir), {
+      lookupImpl: publicLookup,
+      fetchImpl: async () => new Response("", {
+        status: 302,
+        headers: { "location": "http://127.0.0.1/admin" }
+      })
+    }).run("web-fetch https://example.com/start");
+    assert.equal(redirect.ok, false);
+    assert.match(redirect.output, /private|internal/i);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("ToolRunner web-search parses key-free HTML results without JavaScript execution", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-tools-web-search-"));
+  try {
+    const requested: string[] = [];
+    const runner = new ToolRunner(testToolsConfig(dir), {
+      fetchImpl: async (input) => {
+        requested.push(String(input));
+        return new Response(`
+          <html><body>
+            <a class="result__a" href="/l/?uddg=https%3A%2F%2Fexample.com%2Fdocs">Example &amp; Docs</a>
+            <a class="result__snippet">Readable result <script>NOPE</script> snippet</a>
+            <a class="result__a" href="http://127.0.0.1/private">Private result</a>
+          </body></html>
+        `, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
+      }
+    });
+
+    const result = await runner.run("web-search openclaw 5");
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(requested, ["https://duckduckgo.com/html/?q=openclaw"]);
+    assert.match(result.output, /provider: duckduckgo-html/);
+    assert.match(result.output, /Example & Docs/);
+    assert.match(result.output, /https:\/\/example\.com\/docs/);
+    assert.match(result.output, /Readable result/);
+    assert.doesNotMatch(result.output, /NOPE/);
+    assert.doesNotMatch(result.output, /127\.0\.0\.1/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("ToolRunner web-search can use a configured SearXNG HTML provider", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-tools-web-search-searxng-"));
+  try {
+    const requested: string[] = [];
+    const config = testToolsConfig(dir);
+    config.webSearch = {
+      ...config.webSearch,
+      provider: "searxng-html",
+      searxngBaseUrl: "https://searxng.example.com"
+    };
+    const runner = new ToolRunner(config, {
+      fetchImpl: async (input) => {
+        requested.push(String(input));
+        return new Response(`
+          <html><body>
+            <article class="result result-default">
+              <h3><a href="https://example.org/searx-result">SearXNG &amp; Result</a></h3>
+              <p class="content">SearXNG readable <script>NOPE</script> snippet</p>
+            </article>
+            <article class="result result-default">
+              <h3><a href="/search?q=internal">Provider navigation</a></h3>
+            </article>
+          </body></html>
+        `, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
+      }
+    });
+
+    const result = await runner.run("web-search parity 4");
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(requested, ["https://searxng.example.com/search?q=parity&format=html"]);
+    assert.match(result.output, /provider: searxng-html/);
+    assert.match(result.output, /SearXNG & Result/);
+    assert.match(result.output, /https:\/\/example\.org\/searx-result/);
+    assert.match(result.output, /SearXNG readable/);
+    assert.doesNotMatch(result.output, /NOPE/);
+    assert.doesNotMatch(result.output, /Provider navigation/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("ToolRunner web-search can use a configured Brave Search API provider", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-tools-web-search-brave-"));
+  try {
+    const requested: string[] = [];
+    const seenTokens: string[] = [];
+    const config = testToolsConfig(dir);
+    config.webSearch = {
+      ...config.webSearch,
+      provider: "brave-api",
+      braveApiKey: "brave-smoke-token"
+    };
+    const runner = new ToolRunner(config, {
+      fetchImpl: async (input, init) => {
+        requested.push(String(input));
+        seenTokens.push(new Headers(init?.headers).get("x-subscription-token") ?? "");
+        return new Response(JSON.stringify({
+          web: {
+            results: [
+              {
+                title: "Brave &amp; Result",
+                url: "https://example.net/brave-result",
+                description: "Brave readable <script>NOPE</script> snippet"
+              },
+              {
+                title: "Private result",
+                url: "http://127.0.0.1/private",
+                description: "SHOULD_NOT_APPEAR"
+              }
+            ]
+          }
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+    });
+
+    const result = await runner.run("web-search parity 4");
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(requested, ["https://api.search.brave.com/res/v1/web/search?q=parity&count=4"]);
+    assert.deepEqual(seenTokens, ["brave-smoke-token"]);
+    assert.match(result.output, /provider: brave-api/);
+    assert.match(result.output, /Brave & Result/);
+    assert.match(result.output, /https:\/\/example\.net\/brave-result/);
+    assert.match(result.output, /Brave readable/);
+    assert.doesNotMatch(result.output, /NOPE/);
+    assert.doesNotMatch(result.output, /127\.0\.0\.1/);
+    assert.doesNotMatch(result.output, /SHOULD_NOT_APPEAR/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("ToolRunner web-search can use a configured Tavily Search API provider", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-tools-web-search-tavily-"));
+  try {
+    const requested: string[] = [];
+    const seenAuth: string[] = [];
+    const seenBodies: string[] = [];
+    const config = testToolsConfig(dir);
+    config.webSearch = {
+      ...config.webSearch,
+      provider: "tavily-api",
+      tavilyApiKey: "tavily-smoke-token"
+    };
+    const runner = new ToolRunner(config, {
+      fetchImpl: async (input, init) => {
+        requested.push(String(input));
+        seenAuth.push(new Headers(init?.headers).get("authorization") ?? "");
+        seenBodies.push(String(init?.body ?? ""));
+        return new Response(JSON.stringify({
+          results: [
+            {
+              title: "Tavily &amp; Result",
+              url: "https://example.net/tavily-result",
+              content: "Tavily readable <script>NOPE</script> snippet"
+            },
+            {
+              title: "Private result",
+              url: "http://127.0.0.1/private",
+              content: "SHOULD_NOT_APPEAR"
+            }
+          ]
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+    });
+
+    const result = await runner.run("web-search parity 4");
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(requested, ["https://api.tavily.com/search"]);
+    assert.deepEqual(seenAuth, ["Bearer tavily-smoke-token"]);
+    assert.deepEqual(seenBodies.map((body) => JSON.parse(body)), [{
+      query: "parity",
+      max_results: 4,
+      search_depth: "basic",
+      include_answer: false,
+      include_raw_content: false
+    }]);
+    assert.match(result.output, /provider: tavily-api/);
+    assert.match(result.output, /Tavily & Result/);
+    assert.match(result.output, /https:\/\/example\.net\/tavily-result/);
+    assert.match(result.output, /Tavily readable/);
+    assert.doesNotMatch(result.output, /NOPE/);
+    assert.doesNotMatch(result.output, /127\.0\.0\.1/);
+    assert.doesNotMatch(result.output, /SHOULD_NOT_APPEAR/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("ToolRunner web-search can use a configured Perplexity Search API provider", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-tools-web-search-perplexity-"));
+  try {
+    const requested: string[] = [];
+    const seenAuth: string[] = [];
+    const seenBodies: string[] = [];
+    const config = testToolsConfig(dir);
+    config.webSearch = {
+      ...config.webSearch,
+      provider: "perplexity-api",
+      perplexityApiKey: "perplexity-smoke-token"
+    };
+    const runner = new ToolRunner(config, {
+      fetchImpl: async (input, init) => {
+        requested.push(String(input));
+        seenAuth.push(new Headers(init?.headers).get("authorization") ?? "");
+        seenBodies.push(String(init?.body ?? ""));
+        return new Response(JSON.stringify({
+          results: [
+            {
+              title: "Perplexity &amp; Result",
+              url: "https://example.net/perplexity-result",
+              snippet: "Perplexity readable <script>NOPE</script> snippet"
+            },
+            {
+              title: "Private result",
+              url: "http://127.0.0.1/private",
+              snippet: "SHOULD_NOT_APPEAR"
+            }
+          ]
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+    });
+
+    const result = await runner.run("web-search parity 4");
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(requested, ["https://api.perplexity.ai/search"]);
+    assert.deepEqual(seenAuth, ["Bearer perplexity-smoke-token"]);
+    assert.deepEqual(seenBodies.map((body) => JSON.parse(body)), [{
+      query: "parity",
+      max_results: 4,
+      max_tokens: 5000,
+      max_tokens_per_page: 1024
+    }]);
+    assert.match(result.output, /provider: perplexity-api/);
+    assert.match(result.output, /Perplexity & Result/);
+    assert.match(result.output, /https:\/\/example\.net\/perplexity-result/);
+    assert.match(result.output, /Perplexity readable/);
+    assert.doesNotMatch(result.output, /NOPE/);
+    assert.doesNotMatch(result.output, /127\.0\.0\.1/);
+    assert.doesNotMatch(result.output, /SHOULD_NOT_APPEAR/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("ToolRunner web-search can use a configured Exa Search API provider", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-tools-web-search-exa-"));
+  try {
+    const requested: string[] = [];
+    const seenTokens: string[] = [];
+    const seenBodies: string[] = [];
+    const config = testToolsConfig(dir);
+    config.webSearch = {
+      ...config.webSearch,
+      provider: "exa-api",
+      exaApiKey: "exa-smoke-token"
+    };
+    const runner = new ToolRunner(config, {
+      fetchImpl: async (input, init) => {
+        requested.push(String(input));
+        seenTokens.push(new Headers(init?.headers).get("x-api-key") ?? "");
+        seenBodies.push(String(init?.body ?? ""));
+        return new Response(JSON.stringify({
+          results: [
+            {
+              title: "Exa &amp; Result",
+              url: "https://example.net/exa-result",
+              highlights: ["Exa readable <script>NOPE</script> snippet"]
+            },
+            {
+              title: "Private result",
+              url: "http://127.0.0.1/private",
+              highlights: ["SHOULD_NOT_APPEAR"]
+            }
+          ]
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+    });
+
+    const result = await runner.run("web-search parity 4");
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(requested, ["https://api.exa.ai/search"]);
+    assert.deepEqual(seenTokens, ["exa-smoke-token"]);
+    assert.deepEqual(seenBodies.map((body) => JSON.parse(body)), [{
+      query: "parity",
+      numResults: 4,
+      contents: { highlights: true }
+    }]);
+    assert.match(result.output, /provider: exa-api/);
+    assert.match(result.output, /Exa & Result/);
+    assert.match(result.output, /https:\/\/example\.net\/exa-result/);
+    assert.match(result.output, /Exa readable/);
+    assert.doesNotMatch(result.output, /NOPE/);
+    assert.doesNotMatch(result.output, /127\.0\.0\.1/);
+    assert.doesNotMatch(result.output, /SHOULD_NOT_APPEAR/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("ToolRunner web-search can use a configured Firecrawl Search API provider", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-tools-web-search-firecrawl-"));
+  try {
+    const requested: string[] = [];
+    const seenAuth: string[] = [];
+    const seenBodies: string[] = [];
+    const config = testToolsConfig(dir);
+    config.webSearch = {
+      ...config.webSearch,
+      provider: "firecrawl-api",
+      firecrawlApiKey: "firecrawl-smoke-token"
+    };
+    const runner = new ToolRunner(config, {
+      fetchImpl: async (input, init) => {
+        requested.push(String(input));
+        seenAuth.push(new Headers(init?.headers).get("authorization") ?? "");
+        seenBodies.push(String(init?.body ?? ""));
+        return new Response(JSON.stringify({
+          success: true,
+          data: {
+            web: [
+              {
+                title: "Firecrawl &amp; Result",
+                url: "https://example.net/firecrawl-result",
+                description: "Firecrawl readable <script>NOPE</script> snippet"
+              },
+              {
+                title: "Private result",
+                url: "http://127.0.0.1/private",
+                description: "SHOULD_NOT_APPEAR"
+              }
+            ]
+          }
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+    });
+
+    const result = await runner.run("web-search parity 4");
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(requested, ["https://api.firecrawl.dev/v2/search"]);
+    assert.deepEqual(seenAuth, ["Bearer firecrawl-smoke-token"]);
+    assert.deepEqual(seenBodies.map((body) => JSON.parse(body)), [{
+      query: "parity",
+      limit: 4,
+      sources: ["web"],
+      ignoreInvalidURLs: true
+    }]);
+    assert.match(result.output, /provider: firecrawl-api/);
+    assert.match(result.output, /Firecrawl & Result/);
+    assert.match(result.output, /https:\/\/example\.net\/firecrawl-result/);
+    assert.match(result.output, /Firecrawl readable/);
+    assert.doesNotMatch(result.output, /NOPE/);
+    assert.doesNotMatch(result.output, /127\.0\.0\.1/);
+    assert.doesNotMatch(result.output, /SHOULD_NOT_APPEAR/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("ToolRunner web-search can use a configured local Ollama Web Search provider without leaking hosted API keys", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-tools-web-search-ollama-"));
+  try {
+    const requested: string[] = [];
+    const seenAuth: string[] = [];
+    const seenBodies: string[] = [];
+    const config = testToolsConfig(dir);
+    config.webSearch = {
+      ...config.webSearch,
+      provider: "ollama-api",
+      ollamaBaseUrl: "http://127.0.0.1:11434",
+      ollamaApiKey: "hosted-ollama-token"
+    };
+    const runner = new ToolRunner(config, {
+      fetchImpl: async (input, init) => {
+        requested.push(String(input));
+        seenAuth.push(new Headers(init?.headers).get("authorization") ?? "");
+        seenBodies.push(String(init?.body ?? ""));
+        return new Response(JSON.stringify({
+          results: [
+            {
+              title: "Ollama &amp; Result",
+              url: "https://example.net/ollama-result",
+              content: "Ollama readable <script>NOPE</script> snippet"
+            },
+            {
+              title: "Private result",
+              url: "http://127.0.0.1/private",
+              content: "SHOULD_NOT_APPEAR"
+            }
+          ]
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+    });
+
+    const result = await runner.run("web-search parity 4");
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(requested, ["http://127.0.0.1:11434/api/experimental/web_search"]);
+    assert.deepEqual(seenAuth, [""]);
+    assert.deepEqual(seenBodies.map((body) => JSON.parse(body)), [{
+      query: "parity",
+      max_results: 4
+    }]);
+    assert.match(result.output, /provider: ollama-api/);
+    assert.match(result.output, /Ollama & Result/);
+    assert.match(result.output, /https:\/\/example\.net\/ollama-result/);
+    assert.match(result.output, /Ollama readable/);
+    assert.doesNotMatch(result.output, /NOPE/);
+    assert.doesNotMatch(result.output, /127\.0\.0\.1\/private/);
+    assert.doesNotMatch(result.output, /SHOULD_NOT_APPEAR/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("ToolRunner web-search can use hosted Ollama Web Search with a bearer API key", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-tools-web-search-ollama-hosted-"));
+  try {
+    const requested: string[] = [];
+    const seenAuth: string[] = [];
+    const seenBodies: string[] = [];
+    const config = testToolsConfig(dir);
+    config.webSearch = {
+      ...config.webSearch,
+      provider: "ollama-api",
+      ollamaBaseUrl: "https://ollama.com",
+      ollamaApiKey: "hosted-ollama-token"
+    };
+    const runner = new ToolRunner(config, {
+      fetchImpl: async (input, init) => {
+        requested.push(String(input));
+        seenAuth.push(new Headers(init?.headers).get("authorization") ?? "");
+        seenBodies.push(String(init?.body ?? ""));
+        return new Response(JSON.stringify({
+          results: [
+            {
+              title: "Hosted Ollama",
+              url: "https://example.net/hosted-ollama-result",
+              content: "hosted ollama readable snippet"
+            }
+          ]
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+    });
+
+    const result = await runner.run("web-search parity 15");
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(requested, ["https://ollama.com/api/web_search"]);
+    assert.deepEqual(seenAuth, ["Bearer hosted-ollama-token"]);
+    assert.deepEqual(seenBodies.map((body) => JSON.parse(body)), [{
+      query: "parity",
+      max_results: 5
+    }]);
+    assert.match(result.output, /provider: ollama-api/);
+    assert.match(result.output, /Hosted Ollama/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("ToolRunner search-files finds literal text without scanning private or symlinked trees", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-tools-search-"));
+  const outsideDir = await mkdtemp(join(tmpdir(), "viser-tools-search-outside-"));
+  try {
+    await mkdir(join(dir, "src"), { recursive: true });
+    await mkdir(join(dir, ".viser"), { recursive: true });
+    await writeFile(join(dir, "src", "note.txt"), "alpha\nNeedle line\nomega", "utf8");
+    await writeFile(join(dir, ".viser", "secret.txt"), "Needle should stay private", "utf8");
+    await writeFile(join(outsideDir, "linked.txt"), "Needle through symlink", "utf8");
+    await symlink(outsideDir, join(dir, "src", "outside-link"));
+
+    const result = await new ToolRunner(testToolsConfig(dir)).run("search-files Needle . 10");
+
+    assert.equal(result.ok, true);
+    assert.match(result.output, /src\/note\.txt:2: Needle line/);
+    assert.doesNotMatch(result.output, /secret/);
+    assert.doesNotMatch(result.output, /linked/);
+    assert.match(result.output, /skipped:/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+    await rm(outsideDir, { recursive: true, force: true });
+  }
+});
+
 test("ToolRunner read-file and list-dir refuse symlinked tool paths", async () => {
   const dir = await mkdtemp(join(tmpdir(), "viser-tools-nofollow-"));
   try {
@@ -86,7 +685,33 @@ function testToolsConfig(dir: string): ToolsConfig {
     shell: {
       enabled: true,
       allowedCommands: ["pwd", "ls", "cat", "git"],
-      timeoutMs: 1000
+      timeoutMs: 3000
+    },
+    webFetch: {
+      enabled: true,
+      provider: "direct-http",
+      extractMode: "text",
+      firecrawlApiKeyEnv: "FIRECRAWL_API_KEY",
+      maxResponseBytes: 2000,
+      timeoutMs: 3000,
+      maxRedirects: 3,
+      cacheTtlMs: 900000,
+      userAgent: "Viser test"
+    },
+    webSearch: {
+      enabled: true,
+      provider: "duckduckgo-html",
+      braveApiKeyEnv: "BRAVE_SEARCH_API_KEY",
+      tavilyApiKeyEnv: "TAVILY_API_KEY",
+      perplexityApiKeyEnv: "PERPLEXITY_API_KEY",
+      exaApiKeyEnv: "EXA_API_KEY",
+      firecrawlApiKeyEnv: "FIRECRAWL_API_KEY",
+      ollamaBaseUrl: "http://127.0.0.1:11434",
+      ollamaApiKeyEnv: "OLLAMA_API_KEY",
+      maxResults: 5,
+      maxResponseBytes: 2000,
+      timeoutMs: 3000,
+      userAgent: "Viser test"
     }
   };
 }

@@ -9,10 +9,10 @@ test("doctorReport includes provider-proof verification and launch rehearsal com
   assert.match(report, /Viser doctor/);
   assert.match(report, /node: v?\d+\.\d+\.\d+ .*requires >= 22\.6\.0/);
   assert.match(report, /Recommended checks:/);
-  assert.match(report, /node src\/index.ts verify --live --probe-all-providers/);
-  assert.match(report, /node src\/index.ts launch-status/);
-  assert.match(report, /node src\/index.ts env-check/);
-  assert.match(report, /node src\/index.ts gateway --dry-run --strict --live --probe-all-providers/);
-  assert.match(report, /node src\/index.ts next-steps --live --probe-all-providers/);
+  assert.match(report, /viser verify --live --probe-all-providers/);
+  assert.match(report, /viser launch-status/);
+  assert.match(report, /viser env-check/);
+  assert.match(report, /viser gateway --dry-run --strict --live --probe-all-providers/);
+  assert.match(report, /viser next-steps --live --probe-all-providers/);
   assert.match(report, /model calls still go through local CLIs/);
 });

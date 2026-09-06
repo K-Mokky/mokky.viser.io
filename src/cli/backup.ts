@@ -215,36 +215,37 @@ function sanitizeConfig(config: ViserConfig): unknown {
   });
 }
 
-function sanitizeValue(value: unknown, key = ""): unknown {
-  if (Array.isArray(value)) return value.map((item) => sanitizeValue(item, key));
+function sanitizeValue(value: unknown, key = "", secretContext = false): unknown {
+  const isSecret = secretContext || looksSecretLike(key);
+  if (Array.isArray(value)) return value.map((item) => sanitizeValue(item, key, isSecret));
   if (typeof value !== "object" || value === null) {
-    return looksSecretLike(key) && value ? REDACTED : value;
+    return isSecret && value ? REDACTED : value;
   }
 
   const output: Record<string, unknown> = {};
   for (const [childKey, childValue] of Object.entries(value)) {
-    output[childKey] = sanitizeValue(childValue, childKey);
+    output[childKey] = sanitizeValue(childValue, childKey, isSecret);
   }
   return output;
 }
 
 function looksSecretLike(key: string): boolean {
-  return /token|secret|password|credential|api[_-]?key/i.test(key);
+  return /token|secret|password|credential|account|chatDbPath|phoneNumberId|webhookUrl|api[_-]?key|siteUrl|baseUrl|botEmail|username|vaultDir|^note$|^notes$|^room$|^rooms$|^target$|^targets$|^channel$|^channels$|^nick$|^from$|^recipient$|^recipients$/i.test(key);
 }
 
 function redactContent(content: string): { content: string; redacted: boolean } {
   let output = content;
 
   output = output.replace(
-    /("(?:(?:[^"\\]|\\.)*?(?:token|secret|password|credential|api[_-]?key)(?:[^"\\]|\\.)*?)"\s*:\s*)"(?:(?:[^"\\]|\\.)*)"/giu,
+    /("(?:(?:[^"\\]|\\.)*?(?:token|secret|password|credential|account|chatDbPath|phoneNumberId|webhookUrl|api[_-]?key|siteUrl|baseUrl|botEmail|username|vaultDir|room|rooms|target|targets|topic|topics|channel|channels|nick|from|recipient|recipients)(?:[^"\\]|\\.)*?)"\s*:\s*)"(?:(?:[^"\\]|\\.)*)"/giu,
     `$1"${REDACTED}"`
   );
   output = output.replace(
-    /(\b[A-Za-z0-9_]*(?:TOKEN|SECRET|PASSWORD|CREDENTIAL|API[_-]?KEY)[A-Za-z0-9_]*\b\s*[:=]\s*["'])([^"'\r\n]*)/giu,
+    /(\b[A-Za-z0-9_]*(?:TOKEN|SECRET|PASSWORD|CREDENTIAL|ACCOUNT|WEBHOOKS?|WEBHOOK_URL|API[_-]?KEY)[A-Za-z0-9_]*\b\s*[:=]\s*["'])([^"'\r\n]*)/giu,
     `$1${REDACTED}`
   );
   output = output.replace(
-    /(\b[A-Za-z0-9_]*(?:TOKEN|SECRET|PASSWORD|CREDENTIAL|API[_-]?KEY)[A-Za-z0-9_]*\b\s*[:=]\s*)([^"'\s,}\]]+)/giu,
+    /(\b[A-Za-z0-9_]*(?:TOKEN|SECRET|PASSWORD|CREDENTIAL|ACCOUNT|WEBHOOKS?|WEBHOOK_URL|API[_-]?KEY)[A-Za-z0-9_]*\b\s*[:=]\s*)([^"'\s,}\]]+)/giu,
     `$1${REDACTED}`
   );
   output = output.replace(/\b\d{6,}:[A-Za-z0-9_-]{20,}\b/gu, REDACTED);

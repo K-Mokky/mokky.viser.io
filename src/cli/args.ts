@@ -13,7 +13,7 @@ export interface ParsedArgs {
 export function parseArgs(argv: string[]): ParsedArgs {
   const flags: Record<string, string | boolean> = {};
   const positionals: string[] = [];
-  let command = "chat";
+  let command = "gateway";
   let sawCommand = false;
 
   for (let index = 0; index < argv.length; index += 1) {

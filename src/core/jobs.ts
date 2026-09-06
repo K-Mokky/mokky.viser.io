@@ -314,7 +314,7 @@ export async function runJobWorkerLoopIteration(
 }
 
 function isIdleJobReport(report: JobRunReport): boolean {
-  return report.ran === 0 && report.lines.every((line) => /^No pending jobs(?: ready to run)?\.|^Hint: gateway\/service\/job-worker|^Next retry:/u.test(line));
+  return report.ran === 0 && report.lines.every((line) => /^No pending jobs(?: ready to run)?\.|^Hint: foreground gateway\/job-worker|^Next retry:/u.test(line));
 }
 
 export async function runQueuedJobs(
@@ -394,7 +394,7 @@ export async function runQueuedJobs(
       ran: 0,
       lines: [
         "No pending jobs.",
-        "Hint: gateway/service/job-worker may have already processed queued jobs; check `/jobs done` or `node src/index.ts jobs done`."
+        "Hint: foreground gateway/job-worker may have already processed queued jobs; check `/jobs done` or `viser jobs done`."
       ]
     };
   }

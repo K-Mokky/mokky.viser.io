@@ -61,6 +61,19 @@ test("gateway defaults to provider-proof preflight before starting foreground wo
   }
 });
 
+test("commandless configured invocation starts the foreground gateway runtime", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-gateway-commandless-"));
+  try {
+    const configPath = await writeCliConfig(dir, ["-e", "console.log('VISER_OK')"], { loopsEnabled: false });
+    const { stdout } = await runViser(["--config", configPath]);
+
+    assert.match(stdout, /Viser preflight: PASS/);
+    assert.match(stdout, /No gateway connectors, scheduler, job worker, or web dashboard are enabled/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("gateway blocks by default when provider proof fails", async () => {
   const dir = await mkdtemp(join(tmpdir(), "viser-gateway-default-blocked-"));
   try {
@@ -181,6 +194,66 @@ test("telegram command reports a missing token before starting a bridge", async 
   }
 });
 
+test("slack command reports missing Socket Mode tokens before starting a bridge", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-slack-token-"));
+  try {
+    const configPath = await writeCliConfig(dir, ["-e", "console.log('VISER_OK')"]);
+
+    await assert.rejects(
+      runViser(["--config", configPath, "slack"]),
+      (error) => {
+        const failure = error as { code?: number; stderr?: string; stdout?: string };
+        assert.equal(failure.code, 1);
+        assert.match(failure.stderr ?? "", /Slack bot token is missing/);
+        assert.doesNotMatch(failure.stdout ?? "", /Viser preflight/);
+        return true;
+      }
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("whatsapp command reports missing Cloud API credentials before starting a bridge", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-whatsapp-token-"));
+  try {
+    const configPath = await writeCliConfig(dir, ["-e", "console.log('VISER_OK')"]);
+
+    await assert.rejects(
+      runViser(["--config", configPath, "whatsapp"]),
+      (error) => {
+        const failure = error as { code?: number; stderr?: string; stdout?: string };
+        assert.equal(failure.code, 1);
+        assert.match(failure.stderr ?? "", /WhatsApp access token is missing/);
+        assert.doesNotMatch(failure.stdout ?? "", /Viser preflight/);
+        return true;
+      }
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("line command reports missing Messaging API credentials before starting a bridge", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-line-token-"));
+  try {
+    const configPath = await writeCliConfig(dir, ["-e", "console.log('VISER_OK')"]);
+
+    await assert.rejects(
+      runViser(["--config", configPath, "line"]),
+      (error) => {
+        const failure = error as { code?: number; stderr?: string; stdout?: string };
+        assert.equal(failure.code, 1);
+        assert.match(failure.stderr ?? "", /LINE channel access token is missing/);
+        assert.doesNotMatch(failure.stdout ?? "", /Viser preflight/);
+        return true;
+      }
+    );
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test("reset command clears the CLI session without provider access", async () => {
   const dir = await mkdtemp(join(tmpdir(), "viser-reset-cli-"));
   try {
@@ -205,7 +278,7 @@ test("dashboard command summarizes state without provider access or preflight", 
     assert.match(stdout, /schema: dashboard\.v1/);
     assert.match(stdout, /Runtime/);
     assert.match(stdout, /jobs: pending=0, running=0, done=0, failed=0, cancelled=0/);
-    assert.match(stdout, /Final live verdict: `node src\/index.ts launch-status`/);
+    assert.match(stdout, /Final live verdict: `viser launch-status`/);
     assert.doesNotMatch(stdout, /All provider attempts failed/);
     assert.doesNotMatch(stdout, /Viser preflight/);
   } finally {
@@ -360,9 +433,18 @@ async function runViser(args: string[]) {
 
   return execFile(process.execPath, ["src/index.ts", ...args], {
     cwd: process.cwd(),
-    timeout: 20_000,
+    timeout: 45_000,
     env: childEnv
   });
+}
+
+function testProviders(echo: ViserConfig["providers"][string]): ViserConfig["providers"] {
+  const emptyPath = join(tmpdir(), "viser-empty-path");
+  const providers: ViserConfig["providers"] = { echo };
+  for (const [id, provider] of Object.entries(DEFAULT_CONFIG.providers)) {
+    providers[id] = { ...provider, env: { PATH: emptyPath } };
+  }
+  return providers;
 }
 
 async function writeCliConfig(
@@ -373,9 +455,10 @@ async function writeCliConfig(
   const loopsEnabled = options.loopsEnabled ?? true;
   const config: ViserConfig = {
     ...DEFAULT_CONFIG,
-    assistant: { ...DEFAULT_CONFIG.assistant, defaultProvider: "echo", fallbackProviders: [], workdir: dir },
+    assistant: { ...DEFAULT_CONFIG.assistant, defaultProvider: "echo", fallbackProviders: [], workdir: dir, autonomy: { ...DEFAULT_CONFIG.assistant.autonomy, enabled: false } },
     storage: { dir: join(dir, ".viser") },
     memory: { ...DEFAULT_CONFIG.memory, dir: join(dir, ".viser", "memory") },
+    personalization: { ...DEFAULT_CONFIG.personalization, dir: join(dir, ".viser", "personalization") },
     globals: { ...DEFAULT_CONFIG.globals, dir: join(dir, ".viser", "globals") },
     skills: { ...DEFAULT_CONFIG.skills, dirs: [join(dir, "skills"), join(dir, ".viser", "skills")] },
     tools: { ...DEFAULT_CONFIG.tools, allowedReadRoots: [dir] },
@@ -385,25 +468,47 @@ async function writeCliConfig(
     actions: { ...DEFAULT_CONFIG.actions, dir: join(dir, ".viser", "actions"), allowedWriteRoots: [dir] },
     connectors: {
       telegram: { ...DEFAULT_CONFIG.connectors.telegram, allowedChatIds: [], defaultChatIds: [] },
-      discord: { ...DEFAULT_CONFIG.connectors.discord, allowedChannelIds: [], defaultChannelIds: [] }
+      discord: { ...DEFAULT_CONFIG.connectors.discord, allowedChannelIds: [], defaultChannelIds: [] },
+      slack: { ...DEFAULT_CONFIG.connectors.slack, allowedChannelIds: [], defaultChannelIds: [] },
+      matrix: { ...DEFAULT_CONFIG.connectors.matrix, allowedRoomIds: [], defaultRoomIds: [] },
+      signal: { ...DEFAULT_CONFIG.connectors.signal, allowedRecipientIds: [], defaultRecipientIds: [] },
+      imessage: { ...DEFAULT_CONFIG.connectors.imessage, allowedHandleIds: [], defaultHandleIds: [] },
+      whatsapp: { ...DEFAULT_CONFIG.connectors.whatsapp, allowedRecipientIds: [], defaultRecipientIds: [] },
+      line: { ...DEFAULT_CONFIG.connectors.line, allowedPeerIds: [], defaultPeerIds: [] },
+      kakaotalk: { ...DEFAULT_CONFIG.connectors.kakaotalk, allowedUserIds: [], defaultUserIds: [] },
+      googleChat: { ...DEFAULT_CONFIG.connectors.googleChat, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      webhook: { ...DEFAULT_CONFIG.connectors.webhook, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      homeAssistant: { ...DEFAULT_CONFIG.connectors.homeAssistant, baseUrl: undefined, accessToken: undefined, service: undefined, services: {}, allowedServiceIds: [], defaultServiceIds: [] },
+      teams: { ...DEFAULT_CONFIG.connectors.teams, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      mattermost: { ...DEFAULT_CONFIG.connectors.mattermost, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      synologyChat: { ...DEFAULT_CONFIG.connectors.synologyChat, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      rocketChat: { ...DEFAULT_CONFIG.connectors.rocketChat, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      feishu: { ...DEFAULT_CONFIG.connectors.feishu, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      dingtalk: { ...DEFAULT_CONFIG.connectors.dingtalk, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      wecom: { ...DEFAULT_CONFIG.connectors.wecom, webhookUrl: undefined, webhookUrls: {}, allowedWebhookIds: [], defaultWebhookIds: [] },
+      zalo: { ...DEFAULT_CONFIG.connectors.zalo, accessToken: undefined, recipient: undefined, recipients: {}, allowedRecipientIds: [], defaultRecipientIds: [] },
+      irc: { ...DEFAULT_CONFIG.connectors.irc, host: undefined, nick: undefined, password: undefined, channel: undefined, channels: {}, allowedChannelIds: [], defaultChannelIds: [] },
+      twitch: { ...DEFAULT_CONFIG.connectors.twitch, enabled: false, accessToken: undefined, botUsername: undefined, channel: undefined, channels: {}, allowedChannelIds: [], defaultChannelIds: [] },
+      ntfy: { ...DEFAULT_CONFIG.connectors.ntfy, enabled: false, token: undefined, topic: undefined, topics: {}, allowedTopicIds: [], defaultTopicIds: [] },
+      mastodon: { ...DEFAULT_CONFIG.connectors.mastodon, enabled: false, baseUrl: undefined, accessToken: undefined, visibility: "private", targets: {}, allowedTargetIds: [], defaultTargetIds: [] },
+      nextcloudTalk: { ...DEFAULT_CONFIG.connectors.nextcloudTalk, baseUrl: undefined, username: undefined, appPassword: undefined, roomToken: undefined, rooms: {}, allowedRoomIds: [], defaultRoomIds: [] },
+      webex: { ...DEFAULT_CONFIG.connectors.webex, accessToken: undefined, allowedRoomIds: [], defaultRoomIds: [] },
+      zulip: { ...DEFAULT_CONFIG.connectors.zulip, siteUrl: undefined, botEmail: undefined, apiKey: undefined, target: undefined, targets: {}, allowedTargetIds: [], defaultTargetIds: [] },
+      email: { ...DEFAULT_CONFIG.connectors.email, enabled: false, from: undefined, recipient: undefined, recipients: {}, allowedRecipientIds: [], defaultRecipientIds: [] },
+      github: { ...DEFAULT_CONFIG.connectors.github, enabled: false, token: undefined, target: undefined, targets: {}, allowedTargetIds: [], defaultTargetIds: [] },
+      todoist: { ...DEFAULT_CONFIG.connectors.todoist, enabled: false, token: undefined, project: undefined, projects: {}, allowedProjectIds: [], defaultProjectIds: [] },
+      notion: { ...DEFAULT_CONFIG.connectors.notion, enabled: false, token: undefined, page: undefined, pages: {}, allowedPageIds: [], defaultPageIds: [] },
+      obsidian: { ...DEFAULT_CONFIG.connectors.obsidian, enabled: false, vaultDir: undefined, note: undefined, notes: {}, allowedNoteIds: [], defaultNoteIds: [] }
     },
-    providers: {
-      codex: { ...DEFAULT_CONFIG.providers.codex, env: { PATH: "" } },
-      gpt: { ...DEFAULT_CONFIG.providers.gpt, env: { PATH: "" } },
-      gemini: { ...DEFAULT_CONFIG.providers.gemini, env: { PATH: "" } },
-      claude: { ...DEFAULT_CONFIG.providers.claude, env: { PATH: "" } },
-      grok: { ...DEFAULT_CONFIG.providers.grok, env: { PATH: "" } },
-      cursor: { ...DEFAULT_CONFIG.providers.cursor, env: { PATH: "" } },
-      echo: {
-        id: "echo",
-        label: "Echo",
-        command: "node",
-        args: providerArgs,
-        promptMode: "argument",
-        timeoutMs: 5000,
-        loginHint: "No login needed for test provider."
-      }
-    }
+    providers: testProviders({
+      id: "echo",
+      label: "Echo",
+      command: "node",
+      args: providerArgs,
+      promptMode: "argument",
+      timeoutMs: 5000,
+      loginHint: "No login needed for test provider."
+    })
   };
   const configPath = join(dir, "viser.config.json");
   await writeFile(configPath, JSON.stringify(config, null, 2), "utf8");

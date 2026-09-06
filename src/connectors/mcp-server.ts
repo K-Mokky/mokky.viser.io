@@ -2,8 +2,9 @@
 // MCP stdio server
 // ================================================================
 // A minimal dependency-free MCP-compatible stdio surface for local clients.
-// It exposes read-only Viser state plus proposal-only actions; it never exposes
-// provider calls or direct approval execution as MCP tools.
+// It exposes read-only Viser state, guarded read-only tools, and proposal-only
+// actions; it never exposes provider calls or direct approval execution as MCP
+// tools.
 
 import { createInterface } from "node:readline/promises";
 import { constants } from "node:fs";
@@ -154,6 +155,38 @@ export class ViserMcpServer {
         })
       },
       {
+        name: "viser_web_fetch",
+        title: "Fetch readable web text",
+        description: "Run Viser's guarded read-only web-fetch tool for public HTTP(S) text/html/json/xml through direct HTTP or configured Firecrawl scrape-backed extraction. Does not call AI providers, execute JavaScript locally, or approve actions.",
+        inputSchema: objectSchema({
+          url: stringSchema("Public http:// or https:// URL. Credentials, localhost/internal hosts, private IPs, and unsafe redirects are blocked."),
+          maxChars: stringSchema("Optional positive integer output cap. Viser still applies configured response and output limits."),
+          extractMode: enumSchema(["text", "markdown"], "Optional extraction mode. text returns normalized readable text; markdown preserves lightweight headings/lists/links."),
+          sessionId: stringSchema("Optional Viser session id.")
+        }, ["url"])
+      },
+      {
+        name: "viser_web_search",
+        title: "Search readable web results",
+        description: "Run Viser's guarded read-only web-search tool for public result snippets across configured DuckDuckGo/SearXNG/Brave/Tavily/Perplexity/Exa/Firecrawl/Ollama providers. Does not call AI providers, execute JavaScript, or approve actions.",
+        inputSchema: objectSchema({
+          query: stringSchema("Search query. Quotes and control characters are not accepted through MCP."),
+          maxResults: stringSchema("Optional positive integer result cap. Viser still applies configured result and response limits."),
+          sessionId: stringSchema("Optional Viser session id.")
+        }, ["query"])
+      },
+      {
+        name: "viser_search_files",
+        title: "Search local files",
+        description: "Run Viser's guarded read-only literal file search under allowed read roots. Skips private runtime/heavy directories and does not call AI providers or approve actions.",
+        inputSchema: objectSchema({
+          query: stringSchema("Literal text query. Quotes and control characters are not accepted through MCP."),
+          path: stringSchema("Optional allowed-root-relative path to search. Defaults to the first allowed read root."),
+          maxMatches: stringSchema("Optional positive integer match cap. Viser still applies configured search limits."),
+          sessionId: stringSchema("Optional Viser session id.")
+        }, ["query"])
+      },
+      {
         name: "viser_propose_open_url",
         title: "Propose opening an external URL",
         description: "Stage an approval-gated browser/mail URL action. The URL is not opened until the user approves it inside Viser.",
@@ -217,11 +250,11 @@ export class ViserMcpServer {
       },
       {
         name: "viser_propose_connector_message",
-        title: "Propose a messenger message",
-        description: "Stage an approval-gated Telegram or Discord outbound message. The message is not sent until the user approves it inside Viser.",
+        title: "Propose a connector message",
+        description: "Stage an approval-gated Telegram, Discord, Slack, Matrix, Signal, iMessage, WhatsApp, LINE, Google Chat, generic Webhook, Home Assistant, Teams, Mattermost, Synology Chat, Rocket.Chat, Feishu, DingTalk, WeCom, Zalo, IRC, Twitch, ntfy, Mastodon, Nextcloud Talk, Webex, Zulip, Email, GitHub, Todoist, Notion, or Obsidian outbound message/service payload. The message is not sent until the user approves it inside Viser.",
         inputSchema: objectSchema({
-          connector: enumSchema(["telegram", "discord"], "Messenger connector to send through."),
-          targetId: stringSchema("Telegram chat id/@channel or Discord channel id. It must already be allowed or paired in Viser."),
+          connector: enumSchema(["telegram", "discord", "slack", "matrix", "signal", "imessage", "whatsapp", "line", "google-chat", "webhook", "home-assistant", "teams", "mattermost", "synology-chat", "rocket-chat", "feishu", "dingtalk", "wecom", "zalo", "irc", "twitch", "ntfy", "mastodon", "nextcloud-talk", "webex", "zulip", "email", "github", "todoist", "notion", "obsidian"], "Connector to send through."),
+          targetId: stringSchema("Telegram chat id/@channel, Discord channel id, Slack channel/group/DM id, Matrix room id, Signal/WhatsApp E.164 recipient, iMessage handle, LINE peer id, Webex roomId, or configured alias for Google Chat/generic Webhook/Home Assistant/Teams/Mattermost/Synology Chat/Rocket.Chat/Feishu/DingTalk/WeCom/Zalo/IRC/Twitch/ntfy/Mastodon/Nextcloud Talk/Zulip/Email/GitHub/Todoist/Notion/Obsidian. It must already be allowed or paired in Viser."),
           text: stringSchema("Message body."),
           sessionId: stringSchema("Optional Viser session id.")
         }, ["connector", "targetId", "text"])
@@ -243,6 +276,23 @@ export class ViserMcpServer {
         return toolText(await this.assistant.handle(`/memory ${argString(args, "query")}`.trim(), sessionId, { source: "cli" }));
       case "viser_pending_approvals":
         return toolText(await this.assistant.handle("/approvals", sessionId, { source: "cli" }));
+      case "viser_web_fetch": {
+        const url = mcpCommandToken(requiredArg(args, "url"), "url");
+        const maxChars = optionalPositiveIntegerToken(args, "maxChars");
+        const extractMode = optionalEnumToken(args, "extractMode", ["text", "markdown"]);
+        return toolText(await this.assistant.handle(["/tool web-fetch", url, maxChars, extractMode].filter(Boolean).join(" "), sessionId, { source: "cli" }));
+      }
+      case "viser_web_search": {
+        const query = mcpQuotedCommandToken(requiredArg(args, "query"), "query");
+        const maxResults = optionalPositiveIntegerToken(args, "maxResults");
+        return toolText(await this.assistant.handle(["/tool web-search", query, maxResults].filter(Boolean).join(" "), sessionId, { source: "cli" }));
+      }
+      case "viser_search_files": {
+        const query = mcpQuotedCommandToken(requiredArg(args, "query"), "query");
+        const path = mcpQuotedCommandToken(argString(args, "path") || ".", "path");
+        const maxMatches = optionalPositiveIntegerToken(args, "maxMatches");
+        return toolText(await this.assistant.handle(["/tool search-files", query, path, maxMatches].filter(Boolean).join(" "), sessionId, { source: "cli" }));
+      }
       case "viser_propose_open_url":
         return toolText(await this.assistant.handle(`/propose open-url ${requiredArg(args, "url")} ${argString(args, "note")}`.trim(), sessionId, { source: "cli" }));
       case "viser_propose_mail_draft":
@@ -334,10 +384,10 @@ export class ViserMcpServer {
       {
         name: "viser_messenger_triage",
         title: "Viser messenger triage",
-        description: "Draft a safe Telegram/Discord triage response while preserving pairing and approval boundaries.",
+        description: "Draft a safe Telegram/Discord/Slack/Matrix/Signal/iMessage/WhatsApp/LINE/KakaoTalk/Google Chat/generic Webhook/Home Assistant/Teams/Mattermost/Synology Chat/Rocket.Chat/Feishu/DingTalk/WeCom/Zalo/IRC/Twitch/ntfy/Mastodon/Nextcloud Talk/Webex/Zulip/Email/GitHub/Todoist/Notion/Obsidian triage response while preserving pairing and approval boundaries.",
         arguments: [
           { name: "message", description: "Incoming user message.", required: true },
-          { name: "connector", description: "Optional connector name such as telegram or discord.", required: false }
+          { name: "connector", description: "Optional connector name such as telegram, discord, slack, matrix, signal, imessage, whatsapp, line, google-chat, webhook, home-assistant, teams, mattermost, synology-chat, rocket-chat, feishu, dingtalk, wecom, zalo, irc, twitch, ntfy, mastodon, nextcloud-talk, webex, zulip, email, github, todoist, notion, or obsidian.", required: false }
         ]
       }
     ];
@@ -351,7 +401,7 @@ export class ViserMcpServer {
         const scope = argString(args, "scope") || "next public release";
         return promptResult("Viser release review prompt", [
           `Review Viser for ${scope}.`,
-          "Use local, no-provider-cost verification first: npm run typecheck, npm test, npm run release:audit, node src/index.ts verify --strict, npm pack --dry-run --json.",
+          "Use local, no-provider-cost verification first: npm run typecheck, npm test, npm run release:audit, viser verify --strict, npm pack --dry-run --json.",
           "Check that creator attribution remains KMokky and no private runtime state, local user paths, messenger handles, tokens, or memory contents are introduced into public files.",
           "Return blockers, warnings, and exact follow-up commands."
         ].join("\n"));
@@ -465,6 +515,34 @@ function argString(args: Record<string, unknown>, key: string): string {
 function requiredArg(args: Record<string, unknown>, key: string): string {
   const value = argString(args, key);
   if (!value) throw new Error(`Missing required MCP tool argument: ${key}`);
+  return value;
+}
+
+function mcpCommandToken(value: string, key: string): string {
+  if (/[\s'"\u0000-\u001f\u007f]/u.test(value)) {
+    throw new Error(`MCP tool argument '${key}' must not contain whitespace, quotes, or control characters.`);
+  }
+  return value;
+}
+
+function mcpQuotedCommandToken(value: string, key: string): string {
+  if (/['"\u0000-\u001f\u007f]/u.test(value)) {
+    throw new Error(`MCP tool argument '${key}' must not contain quotes or control characters.`);
+  }
+  return /\s/u.test(value) ? `"${value}"` : value;
+}
+
+function optionalPositiveIntegerToken(args: Record<string, unknown>, key: string): string {
+  const value = argString(args, key);
+  if (!value) return "";
+  if (!/^[1-9]\d{0,8}$/u.test(value)) throw new Error(`MCP tool argument '${key}' must be a positive integer string.`);
+  return value;
+}
+
+function optionalEnumToken(args: Record<string, unknown>, key: string, values: string[]): string {
+  const value = argString(args, key);
+  if (!value) return "";
+  if (!values.includes(value)) throw new Error(`MCP tool argument '${key}' must be one of: ${values.join(", ")}.`);
   return value;
 }
 

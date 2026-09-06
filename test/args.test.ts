@@ -9,7 +9,7 @@ test("parseArgs extracts command, flags, and positionals", () => {
   assert.deepEqual(parsed.positionals, ["hello", "world"]);
 });
 
-test("parseArgs defaults to chat", () => {
+test("parseArgs defaults to the foreground gateway runtime", () => {
   const parsed = parseArgs([]);
-  assert.equal(parsed.command, "chat");
+  assert.equal(parsed.command, "gateway");
 });

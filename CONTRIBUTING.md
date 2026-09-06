@@ -13,7 +13,7 @@ CLIs instead of GPT/Gemini/Claude/Grok/Cursor model HTTP APIs or model API keys.
   transcripts, memory entries, messenger chat/channel IDs, personal handles,
   emails, local filesystem paths, or real tokens.
 - Do not add model API key requirements or fallback HTTP model clients for the
-  core GPT/Codex, Gemini, Claude, Grok, or Cursor routes. They must keep using local CLI
+  core GPT/Codex, Gemini, Claude, Grok/xAI, or Cursor routes. They must keep using local CLI
   commands (`codex`, `gemini`, `claude`, `grok`, `cursor-agent`).
 - Keep mutation behind approval-gated actions. Do not add hidden provider tools
   that write files, open URLs, send messages, or access external apps without a
@@ -29,6 +29,7 @@ CLIs instead of GPT/Gemini/Claude/Grok/Cursor model HTTP APIs or model API keys.
 4. Run the verification set before opening a PR:
 
 ```bash
+npm run build
 npm test
 npm run typecheck
 npm run audit
@@ -42,6 +43,7 @@ For final local-provider and messenger proof, run this in an environment where
 tokens are configured:
 
 ```bash
+npm run build
 node src/index.ts release-evidence --strict --live --probe-all-providers
 ```
 

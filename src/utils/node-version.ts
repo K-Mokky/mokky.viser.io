@@ -1,9 +1,10 @@
 // ================================================================
 // Node runtime version gate
 // ================================================================
-// Viser is executed directly from `.ts` files, so it depends on Node's native
-// TypeScript stripping support. Feature checks alone are not enough: an older
-// Node runtime may have fetch/WebSocket but still fail to run `src/index.ts`.
+// Source-tree Viser can be executed directly from `.ts` files, and the
+// installed package still targets the same modern Node runtime. Feature checks
+// alone are not enough: an older Node runtime may have fetch/WebSocket but fail
+// source development entrypoints or newer runtime APIs used by the compiled CLI.
 
 export const MIN_NODE_VERSION = "22.6.0";
 

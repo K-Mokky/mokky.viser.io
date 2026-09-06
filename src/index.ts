@@ -2,16 +2,17 @@
 // ================================================================
 // Viser CLI entrypoint
 // ================================================================
-// Run with Node 22.6+ native TypeScript stripping:
-//   node src/index.ts chat
-// or after `npm link`:
-//   viser chat
+// Installed package entry:
+//   viser
+// Source-tree development entry (Node 22.6+ native TypeScript stripping):
+//   node src/index.ts
 
 import { createInterface } from "node:readline/promises";
 import { env, stdin as input, stdout as output } from "node:process";
 import { resolve as resolvePath } from "node:path";
 import { parseArgs, flagBool, flagString } from "./cli/args.ts";
 import { auditReport } from "./cli/audit.ts";
+import { benchmarkReport } from "./cli/benchmark.ts";
 import { createBackupReport } from "./cli/backup.ts";
 import { compactBackupReport } from "./cli/compact-backups.ts";
 import { configCheckReport } from "./cli/config-check.ts";
@@ -30,12 +31,20 @@ import { readinessReport } from "./cli/readiness.ts";
 import { liveLaunchReadinessOptions, providerProofLaunchReadinessOptions, readinessOptionsFromFlags } from "./cli/readiness-options.ts";
 import { releaseEvidenceReportResult } from "./cli/release-evidence.ts";
 import { verify } from "./cli/verify.ts";
+import { voiceLoopReport } from "./cli/voice.ts";
 import { loadConfig } from "./config.ts";
 import { AssistantRuntime } from "./core/assistant.ts";
 import { mcpClientConfigReport } from "./core/mcp-client-config.ts";
 import { providerGuideReport } from "./providers/guide.ts";
 import { runTelegramBridge } from "./connectors/telegram.ts";
+import { runWhatsappBridge } from "./connectors/whatsapp.ts";
 import { runDiscordBridge } from "./connectors/discord.ts";
+import { runImessageBridge } from "./connectors/imessage.ts";
+import { runLineBridge } from "./connectors/line.ts";
+import { runKakaotalkBridge } from "./connectors/kakaotalk.ts";
+import { runMatrixBridge } from "./connectors/matrix.ts";
+import { runSignalBridge } from "./connectors/signal.ts";
+import { runSlackBridge } from "./connectors/slack.ts";
 import { runGateway } from "./connectors/gateway.ts";
 import { createConnectorNotifier } from "./connectors/notifier.ts";
 import { DEFAULT_WEB_DASHBOARD_HOST, DEFAULT_WEB_DASHBOARD_PORT, startWebDashboard } from "./connectors/web-dashboard.ts";
@@ -84,7 +93,10 @@ async function main(): Promise<void> {
   }
 
   if (parsed.command === "onboard" || parsed.command === "start-here" || parsed.command === "quickstart") {
-    const onboardConfig = await loadConfig({ configPath: flagString(parsed.flags, "config") });
+    const previousViserConfig = env.VISER_CONFIG;
+    delete env.VISER_CONFIG;
+    const onboardConfig = await loadConfig();
+    if (previousViserConfig !== undefined) env.VISER_CONFIG = previousViserConfig;
     const apply = !flagBool(parsed.flags, "check") && !flagBool(parsed.flags, "noSetup") && !flagBool(parsed.flags, "no-setup");
     console.log(await onboardReport(onboardConfig, { apply }));
     return;
@@ -156,8 +168,8 @@ async function main(): Promise<void> {
         result.report,
         "",
         result.ok
-          ? "Next: run `node src/index.ts gateway` for foreground mode, or `node src/index.ts service install` for launchd. To resolve warnings first, run `node src/index.ts next-steps --live --probe-all-providers`."
-          : "Next: run `node src/index.ts next-steps --live --probe-all-providers` and fix the blockers above."
+          ? "Next: run `viser` in a terminal window for foreground mode. To resolve warnings first, run `viser next-steps --live --probe-all-providers`."
+          : "Next: run `viser next-steps --live --probe-all-providers` and fix the blockers above."
       ].join("\n"));
       if (!result.ok) process.exitCode = 1;
       return;
@@ -167,6 +179,26 @@ async function main(): Promise<void> {
       const result = await localSmoke(config, { keepArtifacts: flagBool(parsed.flags, "keep") });
       console.log(result.report);
       if (flagBool(parsed.flags, "strict") && !result.ok) process.exitCode = 1;
+      return;
+    }
+    case "benchmark":
+    case "bench":
+    case "perf": {
+      const report = await benchmarkReport(config, {
+        json: flagBool(parsed.flags, "json"),
+        live: flagBool(parsed.flags, "live"),
+        providerId: flagString(parsed.flags, "provider"),
+        prompt: flagString(parsed.flags, "prompt") ?? parsed.positionals.join(" "),
+        iterations: parseOptionalNumber(flagString(parsed.flags, "iterations") ?? flagString(parsed.flags, "n")),
+        warmup: parseOptionalNumber(flagString(parsed.flags, "warmup")),
+        timeoutMs: parseOptionalNumber(flagString(parsed.flags, "timeoutMs") ?? flagString(parsed.flags, "timeout")),
+        baseline: flagString(parsed.flags, "baseline"),
+        hermes: flagString(parsed.flags, "hermes"),
+        openclaw: flagString(parsed.flags, "openclaw"),
+        save: flagBool(parsed.flags, "save"),
+        artifactPath: flagString(parsed.flags, "artifact") ?? flagString(parsed.flags, "artifactPath")
+      });
+      console.log(report);
       return;
     }
     case "audit":
@@ -290,6 +322,11 @@ async function main(): Promise<void> {
     case "skills":
       console.log(await assistant.handle("/skills", sessionId, { source: "cli" }));
       return;
+    case "curate-skills":
+    case "curate-skill":
+    case "learning-curator":
+      console.log(await assistant.handle(`/curate-skills ${parsed.positionals.join(" ")}`.trim(), sessionId, { source: "cli", providerId }));
+      return;
     case "plugins":
       console.log(await assistant.handle("/plugins", sessionId, { source: "cli" }));
       return;
@@ -311,18 +348,41 @@ async function main(): Promise<void> {
     case "remember":
       console.log(await assistant.handle(`/remember ${parsed.positionals.join(" ")}`.trim(), sessionId, { source: "cli" }));
       return;
+    case "persona":
+    case "personalization":
+    case "settings":
     case "global":
     case "globals":
-    case "persona":
-      console.log(await assistant.handle(`/global ${parsed.positionals.join(" ")}`.trim(), sessionId, { source: "cli" }));
+      console.log(await assistant.handle(`/persona ${parsed.positionals.join(" ")}`.trim(), sessionId, { source: "cli" }));
       return;
+    case "persona-set":
+    case "set-persona":
     case "set-global":
-    case "global-set":
-      console.log(await assistant.handle(`/global set ${parsed.positionals.join(" ")}`.trim(), sessionId, { source: "cli" }));
+      console.log(await assistant.handle(`/persona set ${parsed.positionals.join(" ")}`.trim(), sessionId, { source: "cli" }));
       return;
-    case "clear-global":
-    case "unset-global":
-      console.log(await assistant.handle(`/global clear ${parsed.positionals.join(" ")}`.trim(), sessionId, { source: "cli" }));
+    case "persona-unset":
+    case "unset-persona":
+    case "remove-global":
+      console.log(await assistant.handle(`/persona unset ${parsed.positionals.join(" ")}`.trim(), sessionId, { source: "cli" }));
+      return;
+    case "tone":
+    case "ai-tone":
+      console.log(await assistant.handle(`/tone ${parsed.positionals.join(" ")}`.trim(), sessionId, { source: "cli" }));
+      return;
+    case "personality":
+    case "ai-personality":
+      console.log(await assistant.handle(`/personality ${parsed.positionals.join(" ")}`.trim(), sessionId, { source: "cli" }));
+      return;
+    case "user-style":
+    case "speech-style":
+      console.log(await assistant.handle(`/user-style ${parsed.positionals.join(" ")}`.trim(), sessionId, { source: "cli" }));
+      return;
+    case "question-info":
+    case "question-context":
+      console.log(await assistant.handle(`/question-info ${parsed.positionals.join(" ")}`.trim(), sessionId, { source: "cli" }));
+      return;
+    case "answer-format":
+      console.log(await assistant.handle(`/answer-format ${parsed.positionals.join(" ")}`.trim(), sessionId, { source: "cli" }));
       return;
     case "tools":
       console.log(await assistant.handle("/tools", sessionId, { source: "cli" }));
@@ -346,6 +406,11 @@ async function main(): Promise<void> {
     case "team":
     case "swarm":
       console.log(await assistant.handle(`/team ${parsed.positionals.join(" ")}`.trim(), sessionId, { source: "cli", providerId }));
+      return;
+    case "autonomy":
+    case "auto-loop":
+    case "self-improve":
+      console.log(await assistant.handle("/autonomy", sessionId, { source: "cli" }));
       return;
     case "fix-loop":
     case "review-loop":
@@ -430,7 +495,7 @@ async function main(): Promise<void> {
     case "pair-code": {
       const connector = parseConnector(parsed.positionals[0] ?? "");
       if (!connector) {
-        console.log("Usage: viser pair-code telegram|discord [label]");
+        console.log("Usage: viser pair-code telegram|discord|slack|matrix|signal|imessage|whatsapp|line|kakaotalk|google-chat|webhook|home-assistant|teams|mattermost|synology-chat|rocket-chat|feishu|dingtalk|wecom|zalo|irc|twitch|ntfy|mastodon|nextcloud-talk|webex|zulip|email|github|todoist|notion|obsidian [label]");
         return;
       }
       const code = await access.createPairingCode(connector, parsed.positionals.slice(1).join(" ") || undefined);
@@ -444,7 +509,7 @@ async function main(): Promise<void> {
       const connector = parseConnector(parsed.positionals[0] ?? "");
       const id = parsed.positionals[1];
       if (!connector || !id) {
-        console.log("Usage: viser allow telegram|discord <chat-or-channel-id> [label]");
+        console.log("Usage: viser allow telegram|discord|slack|matrix|signal|imessage|whatsapp|line|kakaotalk|google-chat|webhook|home-assistant|teams|mattermost|synology-chat|rocket-chat|feishu|dingtalk|wecom|zalo|irc|twitch|ntfy|mastodon|nextcloud-talk|webex|zulip|email|github|todoist|notion|obsidian <chat-channel-room-recipient-alias-or-room-id> [label]");
         return;
       }
       const peer = await access.allow(connector, id, parsed.positionals.slice(2).join(" ") || undefined);
@@ -455,7 +520,7 @@ async function main(): Promise<void> {
       const connector = parseConnector(parsed.positionals[0] ?? "");
       const id = parsed.positionals[1];
       if (!connector || !id) {
-        console.log("Usage: viser revoke telegram|discord <chat-or-channel-id>");
+        console.log("Usage: viser revoke telegram|discord|slack|matrix|signal|imessage|whatsapp|line|kakaotalk|google-chat|webhook|home-assistant|teams|mattermost|synology-chat|rocket-chat|feishu|dingtalk|wecom|zalo|irc|twitch|ntfy|mastodon|nextcloud-talk|webex|zulip|email|github|todoist|notion|obsidian <chat-channel-room-recipient-alias-or-room-id>");
         return;
       }
       console.log((await access.revoke(connector, id)) ? `Revoked ${connector}:${id}.` : `No access entry for ${connector}:${id}.`);
@@ -469,10 +534,22 @@ async function main(): Promise<void> {
       }));
       return;
     case "ask":
-      await askOnce(assistant, parsed.positionals.join(" "), sessionId, providerId);
+      await askOnce(assistant, parsed.positionals.join(" "), sessionId, providerId, { stream: flagBool(parsed.flags, "stream") });
       return;
     case "chat":
-      await chatLoop(assistant, sessionId, providerId);
+      await chatLoop(assistant, sessionId, providerId, { stream: flagBool(parsed.flags, "stream") });
+      return;
+    case "voice":
+    case "voice-loop":
+    case "voice-chat":
+      console.log(await voiceLoopReport(config, {
+        assistant,
+        sessionId,
+        providerId,
+        proposeSpeech: flagBool(parsed.flags, "proposeSpeak") || flagBool(parsed.flags, "speak"),
+        json: flagBool(parsed.flags, "json"),
+        maxTurns: parseOptionalNumber(flagString(parsed.flags, "maxTurns") ?? flagString(parsed.flags, "turns"))
+      }));
       return;
     case "telegram":
       if (!config.connectors.telegram.botToken) {
@@ -491,6 +568,89 @@ async function main(): Promise<void> {
       }
       if (!await foregroundGate("discord", config, parsed.flags)) return;
       await runDiscordBridge(config.connectors.discord, assistant, access);
+      return;
+    case "slack":
+      if (!config.connectors.slack.botToken) {
+        console.error(`Slack bot token is missing. Set ${config.connectors.slack.botTokenEnv}.`);
+        process.exitCode = 1;
+        return;
+      }
+      if (!config.connectors.slack.appToken) {
+        console.error(`Slack app-level token is missing. Set ${config.connectors.slack.appTokenEnv} for Socket Mode.`);
+        process.exitCode = 1;
+        return;
+      }
+      if (!await foregroundGate("slack", config, parsed.flags)) return;
+      await runSlackBridge(config.connectors.slack, assistant, access);
+      return;
+    case "matrix":
+      if (!config.connectors.matrix.homeserverUrl) {
+        console.error(`Matrix homeserver URL is missing. Set ${config.connectors.matrix.homeserverUrlEnv}.`);
+        process.exitCode = 1;
+        return;
+      }
+      if (!config.connectors.matrix.accessToken) {
+        console.error(`Matrix access token is missing. Set ${config.connectors.matrix.accessTokenEnv}.`);
+        process.exitCode = 1;
+        return;
+      }
+      if (!await foregroundGate("matrix", config, parsed.flags)) return;
+      await runMatrixBridge(config.connectors.matrix, assistant, access);
+      return;
+    case "signal":
+      if (!config.connectors.signal.account) {
+        console.error(`Signal account is missing. Set ${config.connectors.signal.accountEnv}.`);
+        process.exitCode = 1;
+        return;
+      }
+      if (!await foregroundGate("signal", config, parsed.flags)) return;
+      await runSignalBridge(config.connectors.signal, assistant, access);
+      return;
+    case "imessage":
+      if (!await foregroundGate("imessage", config, parsed.flags)) return;
+      await runImessageBridge(config.connectors.imessage, assistant, access);
+      return;
+    case "whatsapp":
+      if (!config.connectors.whatsapp.accessToken) {
+        console.error(`WhatsApp access token is missing. Set ${config.connectors.whatsapp.accessTokenEnv}.`);
+        process.exitCode = 1;
+        return;
+      }
+      if (!config.connectors.whatsapp.phoneNumberId) {
+        console.error(`WhatsApp phone number ID is missing. Set ${config.connectors.whatsapp.phoneNumberIdEnv}.`);
+        process.exitCode = 1;
+        return;
+      }
+      if (!config.connectors.whatsapp.verifyToken) {
+        console.error(`WhatsApp webhook verify token is missing. Set ${config.connectors.whatsapp.verifyTokenEnv}.`);
+        process.exitCode = 1;
+        return;
+      }
+      if (!await foregroundGate("whatsapp", config, parsed.flags)) return;
+      await runWhatsappBridge(config.connectors.whatsapp, assistant, access);
+      return;
+    case "line":
+      if (!config.connectors.line.channelAccessToken) {
+        console.error(`LINE channel access token is missing. Set ${config.connectors.line.channelAccessTokenEnv}.`);
+        process.exitCode = 1;
+        return;
+      }
+      if (!config.connectors.line.channelSecret) {
+        console.error(`LINE channel secret is missing. Set ${config.connectors.line.channelSecretEnv}.`);
+        process.exitCode = 1;
+        return;
+      }
+      if (!await foregroundGate("line", config, parsed.flags)) return;
+      await runLineBridge(config.connectors.line, assistant, access);
+      return;
+    case "kakaotalk":
+      if (!config.connectors.kakaotalk.requestToken) {
+        console.error(`KakaoTalk Skill shared token is missing. Set ${config.connectors.kakaotalk.requestTokenEnv}.`);
+        process.exitCode = 1;
+        return;
+      }
+      if (!await foregroundGate("kakaotalk", config, parsed.flags)) return;
+      await runKakaotalkBridge(config.connectors.kakaotalk, assistant, access);
       return;
     case "gateway": {
       if (flagBool(parsed.flags, "dryRun")) {
@@ -540,7 +700,7 @@ async function main(): Promise<void> {
     default:
       // Treat an unknown command as the beginning of an ask prompt. This makes
       // `viser what is my schedule?` convenient while keeping named commands.
-      await askOnce(assistant, [parsed.command, ...parsed.positionals].join(" "), sessionId, providerId);
+      await askOnce(assistant, [parsed.command, ...parsed.positionals].join(" "), sessionId, providerId, { stream: flagBool(parsed.flags, "stream") });
   }
 }
 
@@ -548,7 +708,8 @@ async function askOnce(
   assistant: AssistantRuntime,
   prompt: string,
   sessionId: string,
-  providerId?: string
+  providerId?: string,
+  options: { stream?: boolean } = {}
 ): Promise<void> {
   const text = prompt.trim();
   if (!text) {
@@ -557,10 +718,28 @@ async function askOnce(
     return;
   }
 
-  console.log(await assistant.handle(text, sessionId, { source: "cli", providerId }));
+  if (!options.stream) {
+    console.log(await assistant.handle(text, sessionId, { source: "cli", providerId }));
+    return;
+  }
+
+  const summary = await assistant.handle(text, sessionId, {
+    source: "cli",
+    providerId,
+    suppressProviderText: true,
+    onProviderOutputChunk: (chunk) => {
+      if (chunk.stream === "stdout") output.write(chunk.text);
+    }
+  });
+  output.write(`${summary.startsWith("\n") ? "" : "\n"}${summary}\n`);
 }
 
-async function chatLoop(assistant: AssistantRuntime, sessionId: string, providerId?: string): Promise<void> {
+async function chatLoop(
+  assistant: AssistantRuntime,
+  sessionId: string,
+  providerId?: string,
+  options: { stream?: boolean } = {}
+): Promise<void> {
   const rl = createInterface({ input, output });
   if (providerId) await assistant.handle(`/provider ${providerId}`, sessionId, { source: "cli" });
   console.log("Viser chat started. Type /help for commands or /exit to quit.");
@@ -570,7 +749,15 @@ async function chatLoop(assistant: AssistantRuntime, sessionId: string, provider
       const line = await rl.question("viser> ");
       const trimmed = line.trim();
       if (["/exit", "/quit", "exit", "quit"].includes(trimmed.toLowerCase())) break;
-      const answer = await assistant.handle(trimmed, sessionId, { source: "cli" });
+      const answer = await assistant.handle(trimmed, sessionId, {
+        source: "cli",
+        suppressProviderText: options.stream,
+        onProviderOutputChunk: options.stream
+          ? (chunk) => {
+            if (chunk.stream === "stdout") output.write(chunk.text);
+          }
+          : undefined
+      });
       console.log(`\n${answer}\n`);
     }
   } finally {
@@ -590,7 +777,7 @@ async function runWebDashboardCommand(
     webDashboardPort: flagString(flags, "port") ?? flagString(flags, "webDashboardPort") ?? flagString(flags, "dashboardPort") ?? String(config.webDashboard.port)
   });
   if (!effectiveConfig) {
-    console.error("Usage: viser web-dashboard [--host 127.0.0.1|localhost|::1] [--port 8787]");
+    console.error("Usage: viser web-dashboard [--host 127.0.0.1|localhost|::1] [--port 8787] [--allow-remote with VISER_DASHBOARD_TOKEN]");
     return;
   }
 
@@ -598,7 +785,9 @@ async function runWebDashboardCommand(
   const handle = await startWebDashboard(dashboardAssistant, {
     host: effectiveConfig.webDashboard.host,
     port: effectiveConfig.webDashboard.port,
-    sessionId
+    sessionId,
+    canvasDir: effectiveConfig.webDashboard.canvasDir,
+    authToken: effectiveConfig.webDashboard.authToken
   });
   console.log(`Viser web dashboard: ${handle.url}`);
   console.log("mode: read-only localhost dashboard (no provider calls, no write/action routes)");
@@ -622,15 +811,22 @@ function configWithWebDashboardFlags(config: ViserConfig, flags: Record<string, 
   const host = flagString(flags, "webDashboardHost") ?? flagString(flags, "dashboardHost") ?? config.webDashboard.host ?? DEFAULT_WEB_DASHBOARD_HOST;
   const portFlag = flagString(flags, "webDashboardPort") ?? flagString(flags, "dashboardPort");
   const port = portFlag ? parseOptionalNumber(portFlag) : config.webDashboard.port ?? DEFAULT_WEB_DASHBOARD_PORT;
+  const allowRemote = config.webDashboard.allowRemote || flagBool(flags, "allowRemote") || flagBool(flags, "webDashboardAllowRemote") || flagBool(flags, "dashboardAllowRemote");
 
-  if (!requested && host === config.webDashboard.host && port === config.webDashboard.port) return config;
-
-  if (!isLocalDashboardHost(host)) {
-    console.error("Usage: viser gateway [--web-dashboard] [--web-dashboard-host 127.0.0.1|localhost|::1] [--web-dashboard-port 8787]");
-    console.error("Refusing to bind the read-only dashboard to a non-localhost interface. Use an explicit local tunnel if remote access is needed.");
+  if (!isLocalDashboardHost(host) && !allowRemote) {
+    console.error("Usage: viser gateway [--web-dashboard] [--web-dashboard-host 127.0.0.1|localhost|::1] [--web-dashboard-port 8787] [--web-dashboard-allow-remote with VISER_DASHBOARD_TOKEN]");
+    console.error("Refusing to bind the dashboard to a non-localhost interface unless allowRemote is explicit and token authentication is configured.");
     process.exitCode = 1;
     return undefined;
   }
+
+  if (!isLocalDashboardHost(host) && allowRemote && !config.webDashboard.authToken) {
+    console.error("Usage: set VISER_DASHBOARD_TOKEN before binding the dashboard to a non-localhost interface.");
+    process.exitCode = 1;
+    return undefined;
+  }
+
+  if (!requested && host === config.webDashboard.host && port === config.webDashboard.port && allowRemote === config.webDashboard.allowRemote) return config;
 
   if (!port || port > 65_535) {
     console.error("Usage: viser gateway [--web-dashboard] [--web-dashboard-host 127.0.0.1|localhost|::1] [--web-dashboard-port 8787]");
@@ -643,6 +839,7 @@ function configWithWebDashboardFlags(config: ViserConfig, flags: Record<string, 
     webDashboard: {
       ...config.webDashboard,
       enabled: requested ? true : config.webDashboard.enabled,
+      allowRemote,
       host,
       port
     }
@@ -658,6 +855,7 @@ function globalHelp(): string {
     "Viser - local-CLI-backed personal AI assistant",
     "",
     "Usage:",
+    "  viser",
     "  viser onboard [--check]   # beginner-friendly first run",
     "  viser setup [--force]",
     "  viser init [--force]",
@@ -670,6 +868,7 @@ function globalHelp(): string {
     "  viser preflight [--strict] [--live] [--probe-all-providers]",
     "  viser launch-status",
     "  viser smoke [--strict] [--keep]",
+    "  viser benchmark [--live] [--save] [--provider codex] [--iterations 5] [--hermes \"hermes ... {prompt}\"] [--openclaw \"openclaw ... {prompt}\"]",
     "  viser audit",
     "  viser release-evidence [--strict] [--json] [--live] [--probe-all-providers]",
     "  viser backup [--output ./viser-backup.json]",
@@ -690,15 +889,17 @@ function globalHelp(): string {
     "  viser session-search <query>",
     "  viser session-compact [id] [max-messages]",
     "  viser skills",
+    "  viser curate-skills [focus] OR curate-skills <id> \"|\" <description> [\"|\" focus]",
     "  viser plugins",
     "  viser plugin <id> <command> \"prompt\"",
     "  viser memory [query]",
     "  viser profile [tag-limit]",
     "  viser memory-compact [max-entries]",
     "  viser remember \"stable fact #tag\"",
-    "  viser global [list|get <key>|set <key> <value>|clear <key>]",
-    "  viser set-global <key> <value>",
-    "  viser clear-global <key>",
+    "  viser persona",
+    "  viser persona tone|personality|user-style|question-info|answer-format \"setting\"",
+    "  viser persona set <key> \"non-sensitive setting\"",
+    "  viser persona-unset <key>",
     "  viser tools",
     "  viser tool <tool> <args>",
     "  viser schedule every <duration> \"prompt\"",
@@ -709,6 +910,7 @@ function globalHelp(): string {
     "  viser team \"task\"",
     "  viser fix-loop \"task\"",
     "  viser supervise \"task\"",
+    "  viser autonomy",
     "  viser jobs [pending|running|done|failed|cancelled]",
     "  viser run-jobs [limit] [--parallel <1-6>] [--unsafe-skip-gate]",
     "  viser job-worker [--parallel <1-6>] [--unsafe-skip-gate]",
@@ -720,23 +922,32 @@ function globalHelp(): string {
     "  viser propose speak \"text to read aloud\"",
     "  viser propose calendar-event <ISO-start> <duration-minutes> \"title\"",
     "  viser propose notify \"title\" \"|\" \"body\"",
-    "  viser propose message telegram:<chat-id>|discord:<channel-id> \"|\" \"text\"",
+    "  viser propose browser-task \"Go to example.com and summarize the landing page\" \"|\" \"domains=example.com\"",
+    "  viser propose message telegram:<chat-id>|discord:<channel-id>|slack:<channel-id>|matrix:<room-id>|signal:<recipient-id>|imessage:<handle-id>|whatsapp:<recipient-id>|line:<peer-id>|google-chat:<webhook-id>|webhook:<webhook-id>|home-assistant:<service-alias>|teams:<webhook-id>|mattermost:<webhook-id>|synology-chat:<webhook-id>|rocket-chat:<webhook-id>|feishu:<webhook-id>|dingtalk:<webhook-id>|wecom:<webhook-id>|zalo:<recipient-alias>|irc:<channel-alias>|twitch:<channel-alias>|ntfy:<topic-alias>|mastodon:<target-alias>|nextcloud-talk:<room-alias>|webex:<room-id>|zulip:<target-id>|email:<recipient-alias> \"|\" \"text\"",
     "  viser approvals",
     "  viser approve <id>",
     "  viser reject <id>",
     "  viser delete-action <id>",
     "  viser scheduler [--unsafe-skip-gate]",
     "  viser service-run [--live] [--probe-providers|--probe-all-providers]",
-    "  viser service plist|write-plist|systemd|write-systemd|windows|write-windows|check|install|reinstall|uninstall|status|start|stop|restart|logs",
-    "  viser pair-code telegram|discord [label]",
+    "  viser service plist|write-plist|systemd|write-systemd|windows|write-windows|check|install|reinstall|uninstall|status|start|stop|restart|logs|health|trim-logs",
+    "  viser pair-code telegram|discord|slack|matrix|signal|imessage|whatsapp|line|kakaotalk|google-chat|webhook|home-assistant|teams|mattermost|synology-chat|rocket-chat|feishu|dingtalk|wecom|zalo|irc|twitch|ntfy|mastodon|nextcloud-talk|webex|zulip|email|github|todoist|notion|obsidian [label]",
     "  viser access",
-    "  viser allow telegram|discord <id> [label]",
-    "  viser revoke telegram|discord <id>",
+    "  viser allow telegram|discord|slack|matrix|signal|imessage|whatsapp|line|kakaotalk|google-chat|webhook|home-assistant|teams|mattermost|synology-chat|rocket-chat|feishu|dingtalk|wecom|zalo|irc|twitch|ntfy|mastodon|nextcloud-talk|webex|zulip|email|github|todoist|notion|obsidian <id> [label]",
+    "  viser revoke telegram|discord|slack|matrix|signal|imessage|whatsapp|line|kakaotalk|google-chat|webhook|home-assistant|teams|mattermost|synology-chat|rocket-chat|feishu|dingtalk|wecom|zalo|irc|twitch|ntfy|mastodon|nextcloud-talk|webex|zulip|email|github|todoist|notion|obsidian <id>",
     "  viser login [provider] [--probe]",
-    "  viser ask [--provider codex|gpt|gemini|claude|grok|cursor] \"prompt\"",
-    "  viser chat [--provider codex|gpt|gemini|claude|grok|cursor]",
+    "  viser ask [--provider codex|gpt|gemini|claude|grok|xai|cursor] [--stream] \"prompt\"",
+    "  viser chat [--provider codex|gpt|gemini|claude|grok|xai|cursor] [--stream]",
+    "  viser voice [--propose-speak] [--max-turns 50] < transcript-lines.txt",
     "  viser telegram [--unsafe-skip-gate]",
     "  viser discord [--unsafe-skip-gate]",
+    "  viser slack [--unsafe-skip-gate]",
+    "  viser matrix [--unsafe-skip-gate]",
+    "  viser signal [--unsafe-skip-gate]",
+    "  viser imessage [--unsafe-skip-gate]",
+    "  viser whatsapp [--unsafe-skip-gate]",
+    "  viser line [--unsafe-skip-gate]",
+    "  viser kakaotalk [--unsafe-skip-gate]",
     "  viser gateway [--dry-run] [--strict] [--unsafe-skip-gate] [--web-dashboard] [--live] [--probe-providers|--probe-all-providers]",
     "",
     "Global flags:",
@@ -770,7 +981,7 @@ async function firstRunSetupReport(): Promise<string> {
     "",
     await setupReport(false),
     "",
-    "First-run setup is complete. Review `.env` for tokens or provider choices, then run `viser` again to start chat."
+    "First-run setup is complete. Review `.env` for tokens or provider choices, then run `viser` to start immediately or `viser service install` to keep it always-on after the live provider-proof gate."
   ].join("\n");
 }
 

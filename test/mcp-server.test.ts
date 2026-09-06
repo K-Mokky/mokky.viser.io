@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ViserMcpServer } from "../src/connectors/mcp-server.ts";
@@ -29,6 +29,9 @@ test("ViserMcpServer initializes with tools capability and lists stable tools", 
         "viser_status",
         "viser_memory_search",
         "viser_pending_approvals",
+        "viser_web_fetch",
+        "viser_web_search",
+        "viser_search_files",
         "viser_propose_open_url",
         "viser_propose_mail_draft",
         "viser_propose_file_write",
@@ -39,6 +42,112 @@ test("ViserMcpServer initializes with tools capability and lists stable tools", 
       ]
     );
   } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("ViserMcpServer exposes guarded web-search without provider calls or JavaScript execution", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-mcp-web-search-"));
+  const originalFetch = globalThis.fetch;
+  try {
+    const config = testConfig(dir);
+    const server = new ViserMcpServer(config, new AssistantRuntime(config, {}));
+    globalThis.fetch = async () => new Response(`
+      <html><body>
+        <a class="result__a" href="/l/?uddg=https%3A%2F%2Fexample.com%2Fmcp">MCP Search Result</a>
+        <div class="result__snippet">Useful <script>NOPE</script> context</div>
+      </body></html>
+    `, { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
+
+    const searched = await server.handle({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "viser_web_search",
+        arguments: { query: "mcp search", maxResults: "3", sessionId: "mcp:test" }
+      }
+    });
+
+    const text = (searched?.result as any).content[0].text;
+    assert.match(text, /status: ok/);
+    assert.match(text, /MCP Search Result/);
+    assert.match(text, /https:\/\/example\.com\/mcp/);
+    assert.match(text, /Useful context/);
+    assert.doesNotMatch(text, /NOPE/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("ViserMcpServer exposes guarded local file search without provider calls", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-mcp-search-files-"));
+  try {
+    const config = testConfig(dir);
+    const assistant = new AssistantRuntime(config, {});
+    const server = new ViserMcpServer(config, assistant);
+    await writeFile(join(dir, "notes.txt"), "alpha\nMCP_SEARCH_OK\nomega", "utf8");
+
+    const searched = await server.handle({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "viser_search_files",
+        arguments: { query: "MCP_SEARCH_OK", path: ".", maxMatches: "10", sessionId: "mcp:test" }
+      }
+    });
+
+    const text = (searched?.result as any).content[0].text;
+    assert.match(text, /status: ok/);
+    assert.match(text, /notes\.txt:2: MCP_SEARCH_OK/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("ViserMcpServer exposes guarded web-fetch without provider calls or JavaScript execution", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-mcp-web-fetch-"));
+  const originalFetch = globalThis.fetch;
+  try {
+    const config = testConfig(dir);
+    const server = new ViserMcpServer(config, new AssistantRuntime(config, {}));
+    globalThis.fetch = async () => new Response("<html><body><h1>MCP_WEB_FETCH_OK</h1><script>NOPE</script><p>readable</p></body></html>", {
+      status: 200,
+      headers: { "content-type": "text/html; charset=utf-8" }
+    });
+
+    const fetched = await server.handle({
+      jsonrpc: "2.0",
+      id: 1,
+      method: "tools/call",
+      params: {
+        name: "viser_web_fetch",
+        arguments: { url: "https://93.184.216.34/smoke", maxChars: "200", extractMode: "markdown", sessionId: "mcp:test" }
+      }
+    });
+    const blocked = await server.handle({
+      jsonrpc: "2.0",
+      id: 2,
+      method: "tools/call",
+      params: {
+        name: "viser_web_fetch",
+        arguments: { url: "http://localhost:8787/private", sessionId: "mcp:test" }
+      }
+    });
+
+    const fetchedText = (fetched?.result as any).content[0].text;
+    assert.match(fetchedText, /status: ok/);
+    assert.match(fetchedText, /extract-mode: markdown/);
+    assert.match(fetchedText, /MCP_WEB_FETCH_OK/);
+    assert.match(fetchedText, /# MCP_WEB_FETCH_OK/);
+    assert.match(fetchedText, /readable/);
+    assert.doesNotMatch(fetchedText, /NOPE/);
+    assert.match((blocked?.result as any).content[0].text, /status: failed/);
+    assert.match((blocked?.result as any).content[0].text, /private\/internal hostnames/);
+  } finally {
+    globalThis.fetch = originalFetch;
     await rm(dir, { recursive: true, force: true });
   }
 });

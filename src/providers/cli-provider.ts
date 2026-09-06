@@ -42,7 +42,13 @@ export class CliModelProvider implements ModelProvider {
         inheritEnv: false,
         timeoutMs: this.config.timeoutMs,
         maxOutputBytes: this.config.maxOutputBytes,
-        abortOnOutputPatterns: INTERACTIVE_AUTH_PATTERNS
+        abortOnOutputPatterns: INTERACTIVE_AUTH_PATTERNS,
+        onStdoutChunk: request.onOutputChunk
+          ? (chunk) => request.onOutputChunk?.({ stream: "stdout", text: redactProviderSecrets(this.config, chunk) })
+          : undefined,
+        onStderrChunk: request.onOutputChunk
+          ? (chunk) => request.onOutputChunk?.({ stream: "stderr", text: redactProviderSecrets(this.config, chunk) })
+          : undefined
       });
 
       if (result.abortedReason) {
@@ -93,6 +99,11 @@ function redactProviderSecrets(config: CliProviderConfig, value: string): string
   for (const [key, secret] of Object.entries({ ...process.env, ...config.env })) {
     if (!secret || secret.length < 6 || !looksSecretLike(key)) continue;
     output = output.split(secret).join("[REDACTED]");
+    const partialLength = Math.min(secret.length - 1, 48);
+    for (let length = partialLength; length >= 8; length -= 1) {
+      const prefix = secret.slice(0, length);
+      if (output.includes(prefix)) output = output.split(prefix).join("[REDACTED]");
+    }
   }
   return output;
 }

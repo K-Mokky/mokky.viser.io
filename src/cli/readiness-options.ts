@@ -2,7 +2,7 @@
 // Readiness option helpers
 // ================================================================
 // CLI commands intentionally share the same flag parsing rules so safe launch
-// paths cannot drift: foreground/service launches always validate configured
+// paths cannot drift: foreground launches always validate configured
 // live connector tokens and prove provider runtime unless explicitly using a
 // raw escape hatch.
 

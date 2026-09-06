@@ -251,6 +251,35 @@ test("CliModelProvider marks truncated successful provider output", async () => 
   assert.doesNotMatch(response.text, /fgh/);
 });
 
+test("CliModelProvider forwards redacted bounded streaming chunks", async () => {
+  const provider = new CliModelProvider({
+    id: "streaming",
+    command: "node",
+    args: ["-e", "process.stdout.write(`alpha ${process.env.PROVIDER_SECRET} omega`)"],
+    promptMode: "argument",
+    timeoutMs: 5000,
+    maxOutputBytes: 30,
+    env: {
+      PROVIDER_SECRET: "stream-secret-value-1234567890"
+    }
+  });
+  const chunks: string[] = [];
+
+  const response = await provider.generate({
+    providerId: "streaming",
+    sessionId: "test",
+    prompt: "hello",
+    onOutputChunk: (chunk) => {
+      if (chunk.stream === "stdout") chunks.push(chunk.text);
+    }
+  });
+
+  assert.match(chunks.join(""), /alpha \[REDACTED]/);
+  assert.doesNotMatch(chunks.join(""), /stream-secret-value/);
+  assert.match(response.text, /alpha \[REDACTED]/);
+  assert.match(response.text, /stdout truncated at 30 bytes/);
+});
+
 test("CliModelProvider refuses cwd reached through workspace symlink components", async () => {
   const dir = await mkdtemp(join(process.cwd(), ".viser-provider-cwd-nofollow-"));
   try {

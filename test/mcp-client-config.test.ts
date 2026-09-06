@@ -23,6 +23,11 @@ test("mcpClientConfigData never copies connector tokens or provider secret env",
   const config = testConfig("/tmp/viser-mcp-client-secrets");
   config.connectors.telegram.botToken = "telegram-secret-token";
   config.connectors.discord.botToken = "discord-secret-token";
+  config.connectors.slack.botToken = "slack-secret-token";
+  config.connectors.slack.appToken = "slack-app-secret-token";
+  config.connectors.whatsapp.accessToken = "whatsapp-secret-token";
+  config.connectors.whatsapp.phoneNumberId = "12345";
+  config.connectors.whatsapp.verifyToken = "whatsapp-verify-token";
   config.providers.codex.env = { OPENAI_API_KEY: "sk-should-not-appear" };
 
   const result = mcpClientConfigData(config, { target: "claude" });
@@ -31,6 +36,11 @@ test("mcpClientConfigData never copies connector tokens or provider secret env",
   assert.equal(result.target, "claude-desktop");
   assert.doesNotMatch(serialized, /telegram-secret-token/);
   assert.doesNotMatch(serialized, /discord-secret-token/);
+  assert.doesNotMatch(serialized, /slack-secret-token/);
+  assert.doesNotMatch(serialized, /slack-app-secret-token/);
+  assert.doesNotMatch(serialized, /whatsapp-secret-token/);
+  assert.doesNotMatch(serialized, /whatsapp-verify-token/);
+  assert.doesNotMatch(serialized, /12345/);
   assert.doesNotMatch(serialized, /sk-should-not-appear/);
   assert.doesNotMatch(serialized, /OPENAI_API_KEY/);
 });

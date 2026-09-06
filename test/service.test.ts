@@ -741,6 +741,15 @@ test("userLaunchAgentPath targets the user's LaunchAgents directory", () => {
   assert.match(userLaunchAgentPath(serviceConfig("/tmp/viser-test")), /LaunchAgents\/com\.mokky\.viser\.plist$/);
 });
 
+function isolatedTestProviders(echo: ViserConfig["providers"][string]): ViserConfig["providers"] {
+  const emptyPath = join(tmpdir(), "viser-empty-path");
+  const providers: ViserConfig["providers"] = { echo };
+  for (const [id, provider] of Object.entries(DEFAULT_CONFIG.providers)) {
+    providers[id] = { ...provider, env: { PATH: emptyPath } };
+  }
+  return providers;
+}
+
 function serviceConfig(dir: string): ViserConfig {
   return {
     ...DEFAULT_CONFIG,
@@ -753,7 +762,7 @@ function serviceConfig(dir: string): ViserConfig {
 function serviceRuntimeConfig(dir: string): ViserConfig {
   return {
     ...DEFAULT_CONFIG,
-    assistant: { ...DEFAULT_CONFIG.assistant, defaultProvider: "echo", fallbackProviders: [], workdir: dir },
+    assistant: { ...DEFAULT_CONFIG.assistant, defaultProvider: "echo", fallbackProviders: [], workdir: dir, autonomy: { ...DEFAULT_CONFIG.assistant.autonomy, enabled: false } },
     storage: { dir: join(dir, ".viser") },
     memory: { ...DEFAULT_CONFIG.memory, dir: join(dir, ".viser", "memory") },
     globals: { ...DEFAULT_CONFIG.globals, dir: join(dir, ".viser", "globals") },
@@ -764,20 +773,19 @@ function serviceRuntimeConfig(dir: string): ViserConfig {
     access: { ...DEFAULT_CONFIG.access, dir: join(dir, ".viser", "access") },
     actions: { ...DEFAULT_CONFIG.actions, dir: join(dir, ".viser", "actions"), allowedWriteRoots: [dir] },
     connectors: {
+      ...DEFAULT_CONFIG.connectors,
       telegram: { ...DEFAULT_CONFIG.connectors.telegram, allowedChatIds: [], defaultChatIds: [] },
       discord: { ...DEFAULT_CONFIG.connectors.discord, allowedChannelIds: [], defaultChannelIds: [] }
     },
-    providers: {
-      echo: {
-        id: "echo",
-        label: "Echo",
-        command: "node",
-        args: ["-e", "console.log('VISER_OK')"],
-        promptMode: "argument",
-        timeoutMs: 5000,
-        loginHint: "No login needed for test provider."
-      }
-    },
+    providers: isolatedTestProviders({
+      id: "echo",
+      label: "Echo",
+      command: "node",
+      args: ["-e", "console.log('VISER_OK')"],
+      promptMode: "argument",
+      timeoutMs: 5000,
+      loginHint: "No login needed for test provider."
+    }),
     configPath: join(dir, "viser.config.json")
   };
 }

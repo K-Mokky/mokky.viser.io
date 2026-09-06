@@ -67,10 +67,10 @@ export async function compactBackupReport(config: ViserConfig, options: CompactB
     `summary: ${artifacts.length} file${artifacts.length === 1 ? "" : "s"}, ${totalBytes} bytes, ${warnings.length} warning${warnings.length === 1 ? "" : "s"}`,
     fixedCount ? `permissions fixed: ${fixedCount}` : undefined,
     artifacts.length
-      ? "delete: review the list, then run `node src/index.ts compact-backups --delete --force` to remove regular compact backup artifacts."
+      ? "delete: review the list, then run `viser compact-backups --delete --force` to remove regular compact backup artifacts."
       : "delete: nothing to remove.",
     artifacts.length && !options.fixPermissions
-      ? "permissions: run `node src/index.ts compact-backups --fix-permissions` to chmod broad regular compact backups to 600."
+      ? "permissions: run `viser compact-backups --fix-permissions` to chmod broad regular compact backups to 600."
       : undefined,
     "",
     ...formatArtifacts(artifacts)

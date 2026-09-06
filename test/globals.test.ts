@@ -87,7 +87,7 @@ test("core local CLI routes cover Grok and Cursor subscription CLIs", () => {
       ["GPT/Codex", "codex"],
       ["Gemini", "gemini"],
       ["Claude", "claude"],
-      ["Grok", "grok"],
+      ["Grok/xAI", "grok"],
       ["Cursor", "cursor-agent"]
     ]
   );
