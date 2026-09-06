@@ -335,6 +335,7 @@ function testConfig(dir: string): ViserConfig {
   config.assistant.workdir = dir;
   config.storage.dir = join(dir, ".viser");
   config.memory.dir = join(dir, ".viser", "memory");
+  config.globals.dir = join(dir, ".viser", "globals");
   config.skills = { ...config.skills, enabled: false, dirs: [] };
   config.plugins = { ...config.plugins, enabled: false, dirs: [] };
   config.scheduler.dir = join(dir, ".viser", "scheduler");

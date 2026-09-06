@@ -390,6 +390,7 @@ function testConfig(dir: string): ViserConfig {
     storage: { dir: join(dir, "storage") },
     memory: { ...DEFAULT_CONFIG.memory, dir: join(dir, "memory") },
     personalization: { ...DEFAULT_CONFIG.personalization, dir: join(dir, "personalization") },
+    globals: { ...DEFAULT_CONFIG.globals, dir: join(dir, "globals") },
     skills: { ...DEFAULT_CONFIG.skills, dirs: [join(dir, "skills")], promptLimit: 8 },
     plugins: { ...DEFAULT_CONFIG.plugins, dirs: [join(dir, "plugins")], promptLimit: 8 },
     tools: { ...DEFAULT_CONFIG.tools, allowedReadRoots: [dir] },
@@ -596,6 +597,7 @@ test("AssistantRuntime dashboard summarizes operational state without provider c
     assert.equal(data.provider, "echo");
     assert.equal(data.runtime.jobWorker.concurrency, 1);
     assert.equal(data.state.memories.count, 1);
+    assert.equal(data.state.globals.count, 0);
     assert.equal(data.state.plugins.count, 0);
     assert.equal(data.state.schedules.total, 1);
     assert.equal(data.state.schedules.enabledCount, 1);
@@ -822,6 +824,30 @@ test("AssistantRuntime accepts bounded parallel job execution arguments", async 
 
     const invalid = await assistant.handle("/run-jobs 2 --parallel 99", "test:queue-parallel", { source: "test" });
     assert.match(invalid, /Usage: \/run-jobs/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("AssistantRuntime spaces provider calls when a min interval is configured", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-test-throttle-"));
+  try {
+    const base = testConfig(dir);
+    const config: ViserConfig = {
+      ...base,
+      assistant: { ...base.assistant, providerMinIntervalMs: 150 }
+    };
+    const provider = new EchoProvider();
+    const assistant = new AssistantRuntime(config, { echo: provider });
+
+    const started = Date.now();
+    await assistant.handle("first", "test:throttle", { source: "test" });
+    await assistant.handle("second", "test:throttle", { source: "test" });
+    const elapsed = Date.now() - started;
+
+    assert.equal(provider.prompts.length, 2);
+    // The first call never waits; the second must wait at least one interval.
+    assert.ok(elapsed >= 140, `expected throttled spacing, got ${elapsed}ms`);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

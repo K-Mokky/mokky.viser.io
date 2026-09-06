@@ -16,11 +16,13 @@ import { ActionStore } from "./actions.js";
 import { SessionStore } from "./history.js";
 import { JobStore, parseJobStatus, runQueuedJobs } from "./jobs.js";
 import { MemoryStore, parseMemoryInput } from "./memory.js";
+import { GlobalsStore, parseGlobalSetInput } from "./globals.js";
 import { mcpClientConfigReport } from "./mcp-client-config.js";
 import { PersonalizationStore } from "./personalization.js";
 import { formatPluginDetail, formatPluginSelection, PluginRegistry } from "./plugins.js";
 import { promptGuardDecision, promptSafetyContract, untrustedPromptBlock } from "./prompt-guard.js";
 import { PROVIDER_FAILURE_PREFIX } from "./provider-output.js";
+import { ProviderThrottle } from "./provider-throttle.js";
 import { SkillRegistry } from "./skills.js";
 import { ScheduleStore, parseDurationMs, parseScheduleInput } from "./scheduler.js";
 import { ToolRunner } from "./tools.js";
@@ -31,6 +33,7 @@ export class AssistantRuntime {
     sessionStore;
     memoryStore;
     personalizationStore;
+    globalsStore;
     skills;
     plugins;
     tools;
@@ -38,18 +41,24 @@ export class AssistantRuntime {
     scheduleStore;
     jobStore;
     sessionProviders = new Map();
+    providerThrottle;
     constructor(config, providers, options = {}) {
         this.config = config;
         this.providers = providers ?? createProviders(config.providers);
         this.sessionStore = new SessionStore(config.storage.dir);
         this.memoryStore = new MemoryStore(config.memory.dir);
         this.personalizationStore = new PersonalizationStore(config.personalization);
+        this.globalsStore = new GlobalsStore(config.globals.dir, {
+            maxValueChars: config.globals.maxValueChars,
+            maxKeys: config.globals.maxKeys
+        });
         this.skills = new SkillRegistry(config.skills.dirs);
         this.plugins = new PluginRegistry(config.plugins.dirs);
         this.tools = new ToolRunner(config.tools);
         this.actionStore = new ActionStore(config.actions, { sendConnectorMessage: createConnectorMessageSender(config, options.connectorMessageSenderOptions), runBrowserTask: options.runBrowserTask });
         this.scheduleStore = new ScheduleStore(config.scheduler.dir);
         this.jobStore = new JobStore(config.jobs.dir);
+        this.providerThrottle = new ProviderThrottle(config.assistant.providerMinIntervalMs);
     }
     providerIds() {
         return Object.keys(this.providers);
@@ -100,9 +109,10 @@ export class AssistantRuntime {
     }
     async dashboardData(sessionId) {
         const providerId = this.resolveProvider(sessionId);
-        const [historyCount, memoryCount, skills, plugins, schedules, jobs, pendingActions, sessions] = await Promise.all([
+        const [historyCount, memoryCount, globalSettings, skills, plugins, schedules, jobs, pendingActions, sessions] = await Promise.all([
             this.sessionStore.count(sessionId),
             this.config.memory.enabled ? this.memoryStore.count() : Promise.resolve(0),
+            this.config.globals.enabled ? this.globalsStore.list() : Promise.resolve([]),
             this.config.skills.enabled ? this.skills.list() : Promise.resolve([]),
             this.config.plugins.enabled ? this.plugins.list() : Promise.resolve([]),
             this.config.scheduler.enabled ? this.scheduleStore.list() : Promise.resolve([]),
@@ -245,6 +255,11 @@ export class AssistantRuntime {
                     enabled: this.config.personalization.enabled,
                     count: personalizationCount
                 },
+                globals: {
+                    enabled: this.config.globals.enabled,
+                    count: globalSettings.length,
+                    keys: globalSettings.map((setting) => setting.key)
+                },
                 skills: {
                     enabled: this.config.skills.enabled,
                     count: skills.length
@@ -343,7 +358,6 @@ export class AssistantRuntime {
             case "persona":
             case "personalization":
             case "settings":
-            case "global":
             case "global-setting":
             case "global-settings":
                 return { handled: true, text: await this.personalization(argument, options.source ?? "cli") };
@@ -371,6 +385,15 @@ export class AssistantRuntime {
             case "forget":
             case "forget-memory":
                 return { handled: true, text: await this.forgetMemory(argument) };
+            case "global":
+            case "globals":
+                return { handled: true, text: await this.globalsText(argument, options.source ?? "cli") };
+            case "set-global":
+            case "global-set":
+                return { handled: true, text: await this.setGlobal(argument, options.source ?? "cli") };
+            case "clear-global":
+            case "unset-global":
+                return { handled: true, text: await this.clearGlobal(argument, options.source ?? "cli") };
             case "skills":
                 return { handled: true, text: await this.skillsText() };
             case "learn-skill":
@@ -472,6 +495,9 @@ export class AssistantRuntime {
         const personalizationText = this.config.personalization.enabled
             ? await this.personalizationStore.formatForPrompt()
             : "(personalization disabled)";
+        const globalsText = this.config.globals.enabled
+            ? await this.globalsStore.formatForPrompt()
+            : "(globals disabled)";
         const skillCatalog = this.config.skills.enabled
             ? await this.skills.formatCatalog(this.config.skills.promptLimit)
             : "(skills disabled)";
@@ -485,8 +511,11 @@ export class AssistantRuntime {
                 errors.push(`${providerId}: not configured`);
                 continue;
             }
-            const prompt = this.composePrompt(userInput, sessionId, history, providerId, personalizationText, profileText, memoryText, skillCatalog, pluginCatalog, selectedSkill, selectedPlugin);
+            const prompt = this.composePrompt(userInput, sessionId, history, providerId, personalizationText, globalsText, profileText, memoryText, skillCatalog, pluginCatalog, selectedSkill, selectedPlugin);
             try {
+                const throttleWaitMs = this.providerThrottle.reserve();
+                if (throttleWaitMs > 0)
+                    await new Promise((resolve) => setTimeout(resolve, throttleWaitMs));
                 const response = await provider.generate({
                     prompt,
                     sessionId,
@@ -594,6 +623,67 @@ export class AssistantRuntime {
         if (argument && maxEntries === undefined)
             return "Usage: /memory-compact [max-entries]";
         return formatCompactionResult(await this.memoryStore.compact({ maxEntries }));
+    }
+    async globalsText(argument, source) {
+        if (!this.config.globals.enabled)
+            return "Operator globals are disabled in config.";
+        const parts = argument.split(/\s+/).filter(Boolean);
+        const action = (parts[0] ?? "").toLowerCase();
+        if (!action || action === "list" || action === "show")
+            return await this.formatGlobals();
+        if (action === "set")
+            return await this.setGlobal(parts.slice(1).join(" "), source);
+        if (action === "clear" || action === "unset" || action === "delete")
+            return await this.clearGlobal(parts.slice(1).join(" "), source);
+        if (action === "get") {
+            const setting = await this.globalsStore.get(parts.slice(1).join(" "));
+            return setting ? formatGlobalSetting(setting) : `No global stored for '${parts.slice(1).join(" ")}'.`;
+        }
+        return "Usage: /global [list|get <key>|set <key> <value>|clear <key>]";
+    }
+    async formatGlobals() {
+        const settings = await this.globalsStore.list();
+        if (settings.length === 0) {
+            return [
+                "No operator globals stored yet.",
+                "Set always-on persona values with `/global set tone concise Korean` or `/global set personality practical and direct`."
+            ].join("\n");
+        }
+        return ["Operator globals", ...settings.map((setting) => formatGlobalSetting(setting))].join("\n");
+    }
+    async setGlobal(argument, source) {
+        if (!this.config.globals.enabled)
+            return "Operator globals are disabled in config.";
+        if (!canMutateGlobals(source)) {
+            return "Operator globals can only be changed from the Viser CLI. Messenger chats may list them with `/global`.";
+        }
+        const parsed = parseGlobalSetInput(argument);
+        if (!parsed)
+            return "Usage: /global set <key> <value>";
+        try {
+            const setting = await this.globalsStore.set(parsed.key, parsed.value, source);
+            return `Stored global ${formatGlobalSetting(setting)}`;
+        }
+        catch (error) {
+            return error instanceof Error ? error.message : String(error);
+        }
+    }
+    async clearGlobal(argument, source) {
+        if (!this.config.globals.enabled)
+            return "Operator globals are disabled in config.";
+        if (!canMutateGlobals(source)) {
+            return "Operator globals can only be changed from the Viser CLI. Messenger chats may list them with `/global`.";
+        }
+        const key = argument.trim();
+        if (!key)
+            return "Usage: /global clear <key>";
+        try {
+            const removed = await this.globalsStore.clear(key);
+            return removed ? `Cleared global '${key}'.` : `No global stored for '${key}'.`;
+        }
+        catch (error) {
+            return error instanceof Error ? error.message : String(error);
+        }
     }
     async profileText(argument) {
         if (!this.config.memory.enabled)
@@ -1216,7 +1306,7 @@ export class AssistantRuntime {
             `${this.config.assistant.name} commands`,
             "- /help: show this help",
             "- /providers: list configured local CLI providers",
-            "- /provider <id>: switch this session to codex, gpt, gemini, claude, grok, or xai",
+            "- /provider <id>: switch this session to codex, gpt, gemini, claude, grok, xai, or cursor",
             "  Provider fallback is used only when no explicit --provider or /provider override was requested.",
             "- /login [id]: show account-login instructions for provider CLIs",
             "- /provider-guide [id]: show provider smoke-test and login diagnostics",
@@ -1237,6 +1327,7 @@ export class AssistantRuntime {
             "- /profile [tag-limit]: summarize long-term memories by tag",
             "- /memory-compact [max-entries]: dedupe memories and optionally keep newest N",
             "- /forget <memory-id>: remove a long-term memory",
+            "- /global [list|get <key>|set <key> <value>|clear <key>]: inspect or persist always-on persona/style/user facts",
             "- /skills: list reusable SKILL.md procedures",
             "- /learn-skill <id> | <description> | <procedure>: stage an approval-gated reusable SKILL.md from experience",
             "- /reflect-skill <id> | <description> [| focus]: ask the provider to distill recent session experience into an approval-gated SKILL.md",
@@ -1278,7 +1369,7 @@ export class AssistantRuntime {
             "Normal messages are sent to the selected logged-in CLI provider."
         ].join("\n");
     }
-    composePrompt(userInput, sessionId, history, providerId, personalizationText, profileText, memoryText, skillCatalog, pluginCatalog, selectedSkill, selectedPlugin) {
+    composePrompt(userInput, sessionId, history, providerId, personalizationText, globalsText, profileText, memoryText, skillCatalog, pluginCatalog, selectedSkill, selectedPlugin) {
         const historyText = history
             .map((message) => `${message.role.toUpperCase()} [${message.at}]: ${message.content}`)
             .join("\n\n");
@@ -1296,6 +1387,10 @@ export class AssistantRuntime {
             "",
             "# Prompt safety contract",
             promptSafetyContract(),
+            "",
+            "# Operator globals (trusted runtime policy)",
+            "These values were set through Viser /global commands and persist across sessions. Keep them unless they conflict with the safety contract.",
+            globalsText,
             "",
             "# Persistent personalization settings (untrusted user-derived global variables)",
             untrustedPromptBlock("persistent_personalization_settings", personalizationText),
@@ -1918,6 +2013,12 @@ function dashboardNextActions(input) {
     if (lines.length === 2)
         lines.push("- Queue work: `viser enqueue \"긴 작업\"`");
     return lines;
+}
+function canMutateGlobals(source) {
+    return source === "cli" || source === "test";
+}
+function formatGlobalSetting(setting) {
+    return `- ${setting.key}: ${setting.value} (${setting.source}, ${setting.updatedAt})`;
 }
 function formatMemoryEntries(entries) {
     return entries

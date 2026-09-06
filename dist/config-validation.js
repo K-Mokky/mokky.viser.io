@@ -5,11 +5,14 @@
 // before normalizing paths so mistakes fail with actionable messages instead
 // of surfacing later as generic TypeErrors.
 import { parseDurationMs } from "./core/scheduler.js";
+import { CORE_LOCAL_CLI_ROUTES, commandBasename } from "./core/local-cli-policy.js";
+import { isModelApiKeyEnvKey } from "./core/model-api-policy.js";
 const PROMPT_MODES = new Set(["stdin", "template", "argument"]);
 const ACCESS_POLICIES = new Set(["pairing", "allowlist", "open"]);
 const LOCAL_WEB_DASHBOARD_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
 const MAX_JOB_CONCURRENCY = 6;
 const MAX_ASSISTANT_INPUT_CHARS = 50_000;
+const MAX_PROVIDER_MIN_INTERVAL_MS = 600_000;
 const MAX_CONNECTOR_MESSAGES_PER_MINUTE = 120;
 const MAX_CONNECTOR_INPUT_CHARS = 20_000;
 const WEB_SEARCH_PROVIDERS = new Set(["duckduckgo-html", "searxng-html", "brave-api", "tavily-api", "perplexity-api", "exa-api", "firecrawl-api", "ollama-api"]);
@@ -33,6 +36,7 @@ export function configValidationItems(config) {
     validateStorageLike("storage", config.storage, items);
     validateMemory(config.memory, items);
     validatePersonalization(config.personalization, items);
+    validateGlobals(config.globals, items);
     validateSkills(config.skills, items);
     validatePlugins(config.plugins, items);
     validateTools(config.tools, items);
@@ -67,6 +71,15 @@ function validateAssistant(value, providers, items) {
     }
     requireString(value, "assistant.workdir", items);
     validateAutonomy(value.autonomy, items);
+    const providerMinIntervalMs = optionalPositiveInteger(value, "assistant.providerMinIntervalMs", items);
+    if (providerMinIntervalMs !== undefined && providerMinIntervalMs > MAX_PROVIDER_MIN_INTERVAL_MS) {
+        items.push({
+            severity: "fail",
+            path: "assistant.providerMinIntervalMs",
+            message: `must be at most ${MAX_PROVIDER_MIN_INTERVAL_MS}`,
+            next: "Keep the provider throttle interval reasonable so the assistant stays responsive."
+        });
+    }
     if (isPlainObject(providers)) {
         if (defaultProvider && !isPlainObject(providers[defaultProvider])) {
             items.push({
@@ -162,6 +175,30 @@ function validatePersonalization(value, items) {
             path: "personalization.maxValueChars",
             message: "must be at most 5000",
             next: "Store concise tone/personality/style settings instead of long transcripts or sensitive profile dumps."
+        });
+    }
+}
+function validateGlobals(value, items) {
+    if (!section(value, "globals", items))
+        return;
+    requireBoolean(value, "globals.enabled", items);
+    requireString(value, "globals.dir", items);
+    const maxValueChars = optionalPositiveInteger(value, "globals.maxValueChars", items);
+    if (maxValueChars !== undefined && maxValueChars > 4000) {
+        items.push({
+            severity: "fail",
+            path: "globals.maxValueChars",
+            message: "must be at most 4000",
+            next: "Keep always-on persona values small so they cannot crowd the provider prompt."
+        });
+    }
+    const maxKeys = optionalPositiveInteger(value, "globals.maxKeys", items);
+    if (maxKeys !== undefined && maxKeys > 64) {
+        items.push({
+            severity: "fail",
+            path: "globals.maxKeys",
+            message: "must be at most 64",
+            next: "Keep the always-on globals catalog bounded."
         });
     }
 }
@@ -895,6 +932,10 @@ function validateBrowserTaskAction(value, items) {
 function validateConnectors(value, items) {
     if (!section(value, "connectors", items))
         return;
+    const ack = getLeaf(value, "connectors.acknowledgeRelayToS");
+    if (ack !== undefined && typeof ack !== "boolean") {
+        items.push({ severity: "fail", path: "connectors.acknowledgeRelayToS", message: "must be a boolean when present" });
+    }
     validateTelegram(value.telegram, items);
     validateDiscord(value.discord, items);
     validateSlack(value.slack, items);
@@ -1437,7 +1478,16 @@ function validateProviders(value, items) {
             items.push({ severity: "warn", path: `${path}.id`, message: `differs from provider key '${providerId}'; key is used as the canonical id` });
         }
         optionalString(provider, `${path}.label`, items);
-        requireString(provider, `${path}.command`, items);
+        const command = requireString(provider, `${path}.command`, items);
+        const coreRoute = CORE_LOCAL_CLI_ROUTES.find((route) => route.ids.includes(providerId));
+        if (command && coreRoute && commandBasename(command) !== coreRoute.expectedCommand) {
+            items.push({
+                severity: "fail",
+                path: `${path}.command`,
+                message: `${coreRoute.label} route must use logged-in local ${coreRoute.expectedCommand} CLI`,
+                next: `Keep providers.${providerId}.command as the official ${coreRoute.expectedCommand} CLI, not an HTTP/API wrapper.`
+            });
+        }
         const args = requireStringArray(provider, `${path}.args`, items);
         const promptMode = requireString(provider, `${path}.promptMode`, items);
         if (promptMode && !PROMPT_MODES.has(promptMode)) {
@@ -1518,6 +1568,14 @@ function validateStringRecord(value, path, items, objectMessage = "must be an ob
     for (const [key, item] of Object.entries(value)) {
         if (typeof item !== "string") {
             items.push({ severity: "fail", path: `${path}.${key}`, message: "must be a string" });
+        }
+        else if (isModelApiKeyEnvKey(key)) {
+            items.push({
+                severity: "fail",
+                path: `${path}.${key}`,
+                message: "must not contain model API key variables",
+                next: "Use a logged-in local provider CLI instead of model API keys."
+            });
         }
     }
 }

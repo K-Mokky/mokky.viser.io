@@ -101,7 +101,8 @@ test("compactBackupReport refuses compact backup directories reached through sym
       ...compactConfig(dir),
       storage: { dir: join(storageLink, ".viser") },
       memory: { ...DEFAULT_CONFIG.memory, dir: join(storageLink, ".viser", "memory") },
-      personalization: { ...DEFAULT_CONFIG.personalization, dir: join(storageLink, ".viser", "personalization") }
+      personalization: { ...DEFAULT_CONFIG.personalization, dir: join(storageLink, ".viser", "personalization") },
+      globals: { ...DEFAULT_CONFIG.globals, dir: join(storageLink, ".viser", "globals") }
     };
 
     await mkdir(outsideMemory, { recursive: true });
@@ -191,6 +192,7 @@ function compactConfig(dir: string): ViserConfig {
     storage: { dir: join(dir, ".viser") },
     memory: { ...DEFAULT_CONFIG.memory, dir: join(dir, ".viser", "memory") },
     personalization: { ...DEFAULT_CONFIG.personalization, dir: join(dir, ".viser", "personalization") },
+    globals: { ...DEFAULT_CONFIG.globals, dir: join(dir, ".viser", "globals") },
     skills: { ...DEFAULT_CONFIG.skills, dirs: [join(dir, "skills"), join(dir, ".viser", "skills")] },
     tools: { ...DEFAULT_CONFIG.tools, allowedReadRoots: [dir] },
     scheduler: { ...DEFAULT_CONFIG.scheduler, dir: join(dir, ".viser", "scheduler") },

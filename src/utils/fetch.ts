@@ -15,18 +15,28 @@ export async function fetchWithTimeout(
   init: RequestInit = {},
   timeoutMs = DEFAULT_FETCH_TIMEOUT_MS
 ): Promise<Response> {
+  const timeoutMsSafe = Math.max(1, timeoutMs);
   const controller = new AbortController();
   let timedOut = false;
-  const timeout = setTimeout(() => {
-    timedOut = true;
-    controller.abort();
-  }, Math.max(1, timeoutMs));
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+      reject(new Error(`fetch timed out after ${timeoutMsSafe}ms`));
+    }, timeoutMsSafe);
+  });
+
   try {
-    return await fetchImpl(input, { ...init, signal: controller.signal });
+    return await Promise.race([
+      fetchImpl(input, { ...init, signal: controller.signal }),
+      timeoutPromise
+    ]);
   } catch (error) {
-    if (timedOut) throw new Error(`fetch timed out after ${Math.max(1, timeoutMs)}ms`);
+    if (timedOut) throw new Error(`fetch timed out after ${timeoutMsSafe}ms`);
     throw error;
   } finally {
-    clearTimeout(timeout);
+    if (timeoutId) clearTimeout(timeoutId);
   }
 }

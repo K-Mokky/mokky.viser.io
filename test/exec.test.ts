@@ -4,6 +4,7 @@ import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { commandExists, runCommand } from "../src/utils/exec.ts";
+import { fetchWithTimeout } from "../src/utils/fetch.ts";
 
 test("runCommand can abort when output matches an interactive prompt", async () => {
   const result = await runCommand({
@@ -111,4 +112,12 @@ test("commandExists mirrors runtime PATH lookup when the first executable candid
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+test("fetchWithTimeout fails stalled hanging fetches without leaving the event loop pending", async () => {
+  const started = Date.now();
+  await assert.rejects(
+    () => fetchWithTimeout(async () => new Promise<Response>(() => undefined), "https://example.invalid", {}, 20),
+    /fetch timed out after 20ms/
+  );
+  assert.ok(Date.now() - started < 1000);
 });

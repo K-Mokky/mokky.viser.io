@@ -50,6 +50,7 @@ async function writeCliConfig(dir: string): Promise<string> {
     },
     storage: { dir: join(dir, ".viser") },
     memory: { dir: join(dir, ".viser", "memory") },
+    globals: { dir: join(dir, ".viser", "globals") },
     skills: { dirs: [join(dir, "skills"), join(dir, ".viser", "skills")] },
     plugins: { dirs: [join(dir, "plugins"), join(dir, ".viser", "plugins")] },
     tools: { allowedReadRoots: [dir] },

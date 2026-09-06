@@ -59,6 +59,12 @@ export const DEFAULT_CONFIG = {
         promptLimit: 12,
         maxValueChars: 1_000
     },
+    globals: {
+        enabled: true,
+        dir: ".viser/globals",
+        maxValueChars: 1000,
+        maxKeys: 24
+    },
     skills: {
         enabled: true,
         dirs: ["skills", ".viser/skills"],
@@ -594,6 +600,15 @@ export const DEFAULT_CONFIG = {
             promptMode: "template",
             timeoutMs: 600_000,
             loginHint: "Run `grok login`; this alias routes xAI/Grok requests through the logged-in Grok CLI."
+        },
+        cursor: {
+            id: "cursor",
+            label: "Cursor Agent CLI",
+            command: "cursor-agent",
+            args: ["--print", "{prompt}"],
+            promptMode: "template",
+            timeoutMs: 600_000,
+            loginHint: "Install Cursor, then run `cursor-agent` once and complete account login. Viser uses that logged-in CLI, not a Cursor API key."
         }
     }
 };
@@ -1028,6 +1043,7 @@ export async function loadConfig(options = {}) {
     merged.storage.dir = resolve(baseDir, merged.storage.dir);
     merged.memory.dir = resolve(baseDir, merged.memory.dir);
     merged.personalization.dir = resolve(baseDir, merged.personalization.dir);
+    merged.globals.dir = resolve(baseDir, merged.globals.dir);
     merged.skills.dirs = merged.skills.dirs.map((dir) => resolve(baseDir, dir));
     merged.plugins.dirs = merged.plugins.dirs.map((dir) => resolve(baseDir, dir));
     merged.tools.allowedReadRoots = merged.tools.allowedReadRoots.map((dir) => resolve(baseDir, dir));

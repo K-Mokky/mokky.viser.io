@@ -4,6 +4,14 @@
   "private": false,
   "description": "CLI-first personal AI assistant that talks to logged-in AI CLIs and can bridge Telegram, Discord, Slack, Matrix, Signal, iMessage, WhatsApp, LINE, KakaoTalk, Google Chat, generic Webhook, Home Assistant, Microsoft Teams, Mattermost, Synology Chat, Rocket.Chat, Feishu, DingTalk, WeCom, Zalo, IRC, Twitch, ntfy, Mastodon, Nextcloud Talk, Webex, Zulip, Email, GitHub issue/PR comments, Todoist tasks, Notion page appends, Obsidian notes, or service actions.",
   "author": "KMokky",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/K-Mokky/mokky.viser.io.git"
+  },
+  "bugs": {
+    "url": "https://github.com/K-Mokky/mokky.viser.io/issues"
+  },
+  "homepage": "https://github.com/K-Mokky/mokky.viser.io#readme",
   "type": "module",
   "bin": {
     "viser": "./dist/index.js"
@@ -15,6 +23,7 @@
     "PRIVACY.md",
     "CONTRIBUTING.md",
     "assets",
+    "docs",
     "config",
     "plugins",
     "skills",
@@ -93,6 +102,7 @@
     "gemini",
     "web-chat",
     "webchat",
+    "cursor",
     "discord",
     "telegram",
     "slack",

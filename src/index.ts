@@ -23,6 +23,7 @@ import { writeExampleConfig } from "./cli/init.ts";
 import { nextStepsReport } from "./cli/next-steps.ts";
 import { preflight } from "./cli/preflight.ts";
 import { setupReport } from "./cli/setup.ts";
+import { onboardReport } from "./cli/onboard.ts";
 import { serviceCommand, trimServiceLogs } from "./cli/service.ts";
 import { localSmoke } from "./cli/smoke.ts";
 import { stateHealthReport } from "./cli/state-health.ts";
@@ -88,6 +89,16 @@ async function main(): Promise<void> {
 
   if (parsed.command === "setup") {
     console.log(await setupReport(flagBool(parsed.flags, "force")));
+    return;
+  }
+
+  if (parsed.command === "onboard" || parsed.command === "start-here" || parsed.command === "quickstart") {
+    const previousViserConfig = env.VISER_CONFIG;
+    delete env.VISER_CONFIG;
+    const onboardConfig = await loadConfig();
+    if (previousViserConfig !== undefined) env.VISER_CONFIG = previousViserConfig;
+    const apply = !flagBool(parsed.flags, "check") && !flagBool(parsed.flags, "noSetup") && !flagBool(parsed.flags, "no-setup");
+    console.log(await onboardReport(onboardConfig, { apply }));
     return;
   }
 
@@ -845,6 +856,7 @@ function globalHelp(): string {
     "",
     "Usage:",
     "  viser",
+    "  viser onboard [--check]   # beginner-friendly first run",
     "  viser setup [--force]",
     "  viser init [--force]",
     "  viser doctor [--config ./viser.config.json]",
@@ -924,8 +936,8 @@ function globalHelp(): string {
     "  viser allow telegram|discord|slack|matrix|signal|imessage|whatsapp|line|kakaotalk|google-chat|webhook|home-assistant|teams|mattermost|synology-chat|rocket-chat|feishu|dingtalk|wecom|zalo|irc|twitch|ntfy|mastodon|nextcloud-talk|webex|zulip|email|github|todoist|notion|obsidian <id> [label]",
     "  viser revoke telegram|discord|slack|matrix|signal|imessage|whatsapp|line|kakaotalk|google-chat|webhook|home-assistant|teams|mattermost|synology-chat|rocket-chat|feishu|dingtalk|wecom|zalo|irc|twitch|ntfy|mastodon|nextcloud-talk|webex|zulip|email|github|todoist|notion|obsidian <id>",
     "  viser login [provider] [--probe]",
-    "  viser ask [--provider codex|gpt|gemini|claude|grok|xai] [--stream] \"prompt\"",
-    "  viser chat [--provider codex|gpt|gemini|claude|grok|xai] [--stream]",
+    "  viser ask [--provider codex|gpt|gemini|claude|grok|xai|cursor] [--stream] \"prompt\"",
+    "  viser chat [--provider codex|gpt|gemini|claude|grok|xai|cursor] [--stream]",
     "  viser voice [--propose-speak] [--max-turns 50] < transcript-lines.txt",
     "  viser telegram [--unsafe-skip-gate]",
     "  viser discord [--unsafe-skip-gate]",
@@ -945,7 +957,7 @@ function globalHelp(): string {
     "  --env          Path to .env file loaded before config (or set VISER_ENV)",
     "",
     "Model access rule:",
-    "  Viser calls logged-in local AI CLIs (codex/claude/gemini/grok), not LLM HTTP APIs."
+    "  Viser calls logged-in local AI CLIs (codex/claude/gemini/grok/cursor-agent), not LLM HTTP APIs."
   ].join("\n");
 }
 
@@ -974,7 +986,7 @@ async function firstRunSetupReport(): Promise<string> {
 }
 
 function allowsMissingConfiguredEnv(command: string): boolean {
-  return new Set(["doctor", "env-check", "env", "environment", "env-init", "write-env", "init", "setup", "help"]).has(command);
+  return new Set(["doctor", "env-check", "env", "environment", "env-init", "write-env", "init", "setup", "onboard", "start-here", "quickstart", "help"]).has(command);
 }
 
 async function foregroundGate(

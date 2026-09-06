@@ -95,6 +95,9 @@ export interface AssistantConfig {
   maxInputChars: number;
   workdir: string;
   autonomy: AutonomyConfig;
+  // Optional: minimum milliseconds between outbound provider CLI invocations.
+  // Omit or set <= 0 to disable. Use it to avoid hammering a subscription CLI.
+  providerMinIntervalMs?: number;
 }
 
 export interface TelegramConnectorConfig {
@@ -551,6 +554,12 @@ export interface MemoryConfig {
   dir: string;
   promptLimit: number;
 }
+export interface GlobalsConfig {
+  enabled: boolean;
+  dir: string;
+  maxValueChars?: number;
+  maxKeys?: number;
+}
 
 export interface PersonalizationConfig {
   enabled: boolean;
@@ -702,6 +711,7 @@ export interface ViserConfig {
   storage: StorageConfig;
   memory: MemoryConfig;
   personalization: PersonalizationConfig;
+  globals: GlobalsConfig;
   skills: SkillsConfig;
   plugins: PluginsConfig;
   tools: ToolsConfig;
@@ -743,6 +753,9 @@ export interface ViserConfig {
     todoist: TodoistConnectorConfig;
     notion: NotionConnectorConfig;
     obsidian: ObsidianConnectorConfig;
+    // Optional acknowledgement that relaying a single-seat provider login to
+    // chat peers may violate provider ToS and risk account bans.
+    acknowledgeRelayToS?: boolean;
   };
   providers: Record<string, CliProviderConfig>;
   configPath?: string;
@@ -915,6 +928,11 @@ export interface DashboardData {
       enabled: boolean;
       count: number;
     };
+    globals: {
+      enabled: boolean;
+      count: number;
+      keys: string[];
+    };
     skills: {
       enabled: boolean;
       count: number;
@@ -977,6 +995,18 @@ export interface MemoryProfileGroup {
   count: number;
   latestAt?: string;
   entries: MemoryEntry[];
+}
+
+export interface GlobalSetting {
+  key: string;
+  value: string;
+  source: string;
+  updatedAt: string;
+}
+
+export interface GlobalsState {
+  schemaVersion: 1;
+  settings: Record<string, GlobalSetting>;
 }
 
 export interface MemoryProfile {

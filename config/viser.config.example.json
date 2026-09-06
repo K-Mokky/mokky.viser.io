@@ -5,6 +5,7 @@
     "systemPrompt": "You are Viser, a local-first CLI assistant created by KMokky. Be concise, practical, and ask before destructive actions.",
     "historyLimit": 12,
     "maxInputChars": 12000,
+    "providerMinIntervalMs": 1000,
     "workdir": ".",
     "fallbackProviders": [
       "gemini",
@@ -31,6 +32,12 @@
     "dir": ".viser/personalization",
     "promptLimit": 12,
     "maxValueChars": 1000
+  },
+  "globals": {
+    "enabled": true,
+    "dir": ".viser/globals",
+    "maxValueChars": 1000,
+    "maxKeys": 24
   },
   "skills": {
     "enabled": true,
@@ -585,6 +592,18 @@
       "promptMode": "template",
       "timeoutMs": 600000,
       "loginHint": "Run `grok login`; this alias routes xAI/Grok requests through the logged-in Grok CLI."
+    },
+    "cursor": {
+      "id": "cursor",
+      "label": "Cursor Agent CLI",
+      "command": "cursor-agent",
+      "args": [
+        "--print",
+        "{prompt}"
+      ],
+      "promptMode": "template",
+      "timeoutMs": 600000,
+      "loginHint": "Install Cursor, then run `cursor-agent` once and complete account login. Viser uses that logged-in CLI, not a Cursor API key."
     }
   },
   "webDashboard": {

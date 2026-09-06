@@ -360,6 +360,14 @@ export async function localSmoke(config, options = {}) {
             expectIncludes(await assistant.handle("/memory smoke", sessionId, { source: "test" }), "concise Korean");
             expectIncludes(await assistant.handle("/profile", sessionId, { source: "test" }), "smoke");
         });
+        await step(items, "globals", "operator globals persist persona settings and inject into later prompts", async () => {
+            expectIncludes(await assistant.handle("/global set tone concise Korean", sessionId, { source: "test" }), "Stored global");
+            expectIncludes(await assistant.handle("/global", sessionId, { source: "test" }), "concise Korean");
+            expectIncludes(await assistant.handle("hello globals", sessionId, { source: "test" }), "SMOKE_PROVIDER_OK");
+            if (!smokeProvider.prompts.at(-1)?.includes("concise Korean")) {
+                throw new Error("Operator globals were not injected into the provider prompt.");
+            }
+        });
         await step(items, "personalization", "global tone/personality/user-style settings persist and inject as untrusted prompt preferences", async () => {
             const callsBefore = smokeProvider.calls;
             expectIncludes(await assistant.handle("/persona tone concise Korean haeyo style", sessionId, { source: "test" }), "Saved personalization");

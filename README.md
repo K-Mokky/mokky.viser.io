@@ -4,7 +4,7 @@
 
 # Viser
 
-Viser는 **API 키로 모델을 호출하지 않고**, 이미 로그인된 로컬 AI CLI(`codex`, `gemini`, `claude`)를 실행해서 답변을 받아오는 TypeScript-first 개인 비서 CLI예요. CLI에서 직접 대화할 수 있고, Telegram/Discord/Slack/Matrix/Signal/iMessage/WhatsApp/LINE/KakaoTalk/Google Chat/generic Webhook/Home Assistant/Teams/Mattermost/Synology Chat/Rocket.Chat/Feishu/DingTalk/WeCom/Zalo/IRC/Twitch/ntfy/Mastodon/Nextcloud Talk/Webex/Zulip/Email/GitHub/Todoist/Notion/Obsidian 커넥터를 교통수단으로 붙여 같은 비서와 대화할 수 있어요.
+Viser는 **API 키로 모델을 호출하지 않고**, 이미 로그인된 로컬 AI CLI(`codex`, `gemini`, `claude`, `grok`, `cursor-agent`)를 실행해서 답변을 받아오는 TypeScript-first 개인 비서 CLI예요. CLI에서 직접 대화할 수 있고, Telegram/Discord/Slack/Matrix/Signal/iMessage/WhatsApp/LINE/KakaoTalk/Google Chat/generic Webhook/Home Assistant/Teams/Mattermost/Synology Chat/Rocket.Chat/Feishu/DingTalk/WeCom/Zalo/IRC/Twitch/ntfy/Mastodon/Nextcloud Talk/Webex/Zulip/Email/GitHub/Todoist/Notion/Obsidian 커넥터를 교통수단으로 붙여 같은 비서와 대화할 수 있어요.
 
 제작자: **KMokky**
 
@@ -14,7 +14,7 @@ Viser는 **API 키로 모델을 호출하지 않고**, 이미 로그인된 로�
 
 ## 핵심 원칙
 
-- **모델 API 미사용**: GPT/Codex, Gemini, Claude, Grok/xAI 응답은 로컬 CLI 계정 로그인 상태를 사용해요. `audit`은 핵심 provider route가 `codex`/`gemini`/`claude`/`grok` CLI 명령인지 확인하고, 활성 `.env`나 provider env에 `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY` 같은 model API key 변수가 들어오면 fail로 막아요.
+- **모델 API 미사용**: GPT/Codex, Gemini, Claude, Grok/xAI, Cursor 응답은 로컬 CLI 계정 로그인 상태를 사용해요. `audit`은 핵심 provider route가 `codex`/`gemini`/`claude`/`grok`/`cursor-agent` CLI 명령인지 확인하고, 활성 `.env`나 provider env에 `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `XAI_API_KEY` 같은 model API key 변수가 들어오면 fail로 막아요.
 - **Provider fallback**: 기본 provider가 실패하면 명시적 override가 없을 때 `fallbackProviders` 순서로 재시도해요.
 - **TypeScript-first + install-safe build**: `src/**/*.ts`가 메인 구현이고, npm package/`npm link`용 `viser` bin은 `dist/index.js`로 빌드돼요. Node 22는 `node_modules` 안의 `.ts` type stripping을 막기 때문에, 배포·전역 설치 경로는 항상 compiled JS를 사용해요.
 - **Python은 보조 도구**: `tools/session_digest.py`는 대화 로그를 사람이 읽기 쉽게 요약해요.
@@ -24,6 +24,8 @@ Viser는 **API 키로 모델을 호출하지 않고**, 이미 로그인된 로�
 - **프롬프트 인젝션 방어**: 사용자/메모리/세션/스킬/플러그인 본문을 untrusted block으로 감싸고 의심 신호를 표시해 system/runtime 정책보다 높은 권한처럼 실행되지 않게 해요.
 - **승인 기반 액션**: 파일 쓰기, 브라우저/메일 URL 열기, Browser Use Cloud/Browserbase/Firecrawl Interact/local CDP browser task, 메일 draft, 로컬 TTS, 캘린더 import, desktop notification은 `/propose`로 staging한 뒤 `/approve`해야 실행돼요.
 - **메신저 접근 제어**: Discord/Telegram/Slack/Matrix/Signal/iMessage/WhatsApp/LINE/KakaoTalk/Google Chat/generic Webhook/Home Assistant/Teams/Mattermost/Synology Chat/Rocket.Chat/Feishu/DingTalk/WeCom/Zalo/IRC/Twitch/ntfy/Mastodon/Nextcloud Talk/Webex/Zulip/Email/GitHub/Todoist/Notion/Obsidian은 기본적으로 pairing/allowlist를 거친 chat/channel/room/recipient/handle/alias만 응답하고, platform send API가 있는 connector만 outbound action을 보내며, peer별 분당 메시지 제한과 입력 길이 제한으로 한 peer가 로컬 provider CLI를 무제한·과대 입력으로 호출하지 못하게 해요.
+- **Provider 호출 throttle**: `assistant.providerMinIntervalMs`로 로컬 provider CLI 호출 사이 최소 간격(ms)을 강제해, durable job·team/fix-loop/supervisor·메신저 중계가 한 구독 계정을 몰아치지 않게 해요. 생략하거나 0이면 비활성이고, 예제 config는 1000ms로 켜져 있어요.
+- **구독 약관·계정 벤 경계**: Viser는 우회/탐지 회피 코드 없이 공식 로그인 CLI(`codex`/`gemini`/`claude`/`grok`/`cursor-agent`)만 호출해요(우회 자체가 약관 위반·벤 사유라서요). 다만 단일 좌석 구독을 메신저로 **다른 사람에게 중계**하거나 무인 상시 자동화하면 약관 위반·벤 위험이 올라가요. 그래서 connector를 켜면 `audit`이 경고하고, `connectors.acknowledgeRelayToS=true`로 위험을 인지했음을 명시해야 경고가 사라져요. 자세한 건 `SECURITY.md`의 "Provider subscription terms and account-ban risk"를 봐요.
 
 ## 설치와 첫 실행
 
@@ -44,6 +46,9 @@ npm ci
 npm run build
 mkdir -p "$HOME/.local/bin"
 NPM_CONFIG_PREFIX="$HOME/.local" npm link   # 이후부터 `viser`만 입력해서 실행
+
+# 컴퓨터가 처음이라면:
+viser onboard
 
 viser setup
 viser doctor
@@ -147,7 +152,7 @@ viser init
 
 ## AI CLI 로그인
 
-Viser는 모델 API 키를 받지 않아요. 대신 아래 CLI를 사용자가 직접 로그인해 둔 상태로 실행해요. `audit`은 `codex`/`gpt` route가 `codex`, `gemini` route가 `gemini`, `claude` route가 `claude` CLI 명령을 쓰는지 확인해 HTTP/API client wrapper로 바뀐 설정을 막아요. 활성 `.env` 또는 `providers.<id>.env`에 `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY` 같은 model API key 변수를 넣으면 `viser audit`과 `verify --strict`가 실패해요. 또한 직접 `chat`/`ask`로 provider를 실행하더라도 explicit `providers.<id>.env`의 model API key 변수는 provider subprocess를 spawn하기 전에 runtime에서 거부해요.
+Viser는 모델 API 키를 받지 않아요. 대신 아래 CLI를 사용자가 직접 로그인해 둔 상태로 실행해요. `audit`은 `codex`/`gpt` route가 `codex`, `gemini` route가 `gemini`, `claude` route가 `claude`, `grok`/`xai` route가 `grok`, `cursor` route가 `cursor-agent` CLI 명령을 쓰는지 확인해 HTTP/API client wrapper로 바뀐 설정을 막아요. 활성 `.env` 또는 `providers.<id>.env`에 `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_GENERATIVE_AI_API_KEY`, `XAI_API_KEY`, `CURSOR_API_KEY` 같은 model API key 변수를 넣으면 `viser audit`과 `verify --strict`가 실패해요. 또한 직접 `chat`/`ask`로 provider를 실행하더라도 explicit `providers.<id>.env`의 model API key 변수는 provider subprocess를 spawn하기 전에 runtime에서 거부해요.
 
 ```bash
 codex login      # GPT/Codex 계열
@@ -155,6 +160,10 @@ codex login      # GPT/Codex 계열
 gemini
 # Claude Code 설치 후 interactive login
 claude
+# xAI Grok CLI 설치 후 interactive login
+grok
+# Cursor Agent CLI 설치 후 interactive login
+cursor-agent
 ```
 
 설치 여부는 다음으로 확인해요.
@@ -282,6 +291,7 @@ viser slack
 - `/profile [tag-limit]`: 장기 메모리를 tag별 user profile로 요약
 - `/memory-compact [max-entries]`: 중복 메모리를 정리하고 선택적으로 최신 N개만 유지
 - `/forget <memory-id>`: 장기 메모리 삭제
+- `/global [list|get <key>|set <key> <value>|clear <key>]`: 말투/성격/사용자 사실을 전역으로 저장하거나 확인
 - `/skills`: 사용 가능한 `SKILL.md` 절차 목록
 - `/learn-skill <id> | <description> | <procedure>`: 경험에서 재사용 가능한 `SKILL.md`를 승인 대기 write action으로 저장
 - `/reflect-skill <id> | <description> [| focus]`: 최근 세션을 provider가 절차로 요약하되, 결과는 승인 대기 `SKILL.md` write action으로만 저장하고 reflection proof를 남김
@@ -1312,6 +1322,7 @@ skills/*/SKILL.md             bundled reusable procedures
 plugins/*/plugin.json         bundled local prompt plugins
 tools/session_digest.py       Python helper for JSONL logs
 aimake.md                     제작 과정 기록
+docs/build/                   파트별 제작 저널과 아키텍처 다이어그램
 ```
 
 ## OpenClaw/Hermes 대비 남은 큰 차이

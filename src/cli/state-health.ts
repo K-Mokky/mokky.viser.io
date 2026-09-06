@@ -18,6 +18,7 @@ import { normalizeClipboardText, normalizeExternalUrl, normalizeSpeechText, pars
 import { normalizePersonalizationState } from "../core/personalization.ts";
 import { nowIso } from "../utils/text.ts";
 import type { ViserConfig } from "../core/types.ts";
+import { validateGlobalsState } from "../core/globals.ts";
 
 const SESSION_WARN_BYTES = 5_000_000;
 const SESSION_WARN_LINES = 1_000;
@@ -31,7 +32,7 @@ const VALID_TASK_SOURCE_LABEL = ["cli", "voice", "web-chat", ...VALID_ACCESS_CON
 const VALID_DELIVERY_KIND_LABEL = ["console", ...VALID_ACCESS_CONNECTORS].join(", ");
 
 export type StateHealthStatus = "pass" | "warn" | "fail";
-type StateFileKind = "json-array" | "json-object" | "scheduler-tasks" | "jobs-state" | "access-state" | "actions-state" | "personalization-state" | "jsonl";
+type StateFileKind = "json-array" | "json-object" | "scheduler-tasks" | "jobs-state" | "access-state" | "actions-state" | "personalization-state" | "globals-state" | "jsonl";
 
 export interface StateHealthItem {
   status: StateHealthStatus;
@@ -102,6 +103,9 @@ export async function stateHealthItems(config: ViserConfig): Promise<StateHealth
   }
   if (await isRegularStateDirectory("personalization", config.personalization.dir, config.assistant.workdir, items)) {
     await checkJsonFile("personalization", join(config.personalization.dir, "settings.json"), "personalization-state", config.assistant.workdir, items);
+  }
+  if (await isRegularStateDirectory("globals", config.globals.dir, config.assistant.workdir, items)) {
+    await checkJsonFile("globals", join(config.globals.dir, "globals.json"), "globals-state", config.assistant.workdir, items);
   }
   if (await isRegularStateDirectory("scheduler", config.scheduler.dir, config.assistant.workdir, items)) {
     await checkJsonFile("scheduler", join(config.scheduler.dir, "tasks.json"), "scheduler-tasks", config.assistant.workdir, items);
@@ -430,6 +434,7 @@ function validateJsonShape(value: unknown, kind: Exclude<StateFileKind, "jsonl">
   if (kind === "jobs-state") return validateArrayItems(value, "queued job", validateQueuedJob);
   if (kind === "actions-state") return validateArrayItems(value, "pending action", validatePendingAction);
   if (kind === "personalization-state") return validatePersonalizationState(value);
+  if (kind === "globals-state") return validateGlobalsState(value);
   return validateAccessState(value);
 }
 
@@ -675,6 +680,7 @@ function repairedContent(plan: StateRepairPlan): string {
   if (["json-array", "scheduler-tasks", "jobs-state", "actions-state"].includes(plan.kind)) return "[]\n";
   if (plan.kind === "access-state") return `${JSON.stringify({ peers: [], codes: [] }, null, 2)}\n`;
   if (plan.kind === "personalization-state") return `${JSON.stringify({ version: 1, settings: [] }, null, 2)}\n`;
+  if (plan.kind === "globals-state") return `${JSON.stringify({ schemaVersion: 1, settings: {} }, null, 2)}\n`;
   return "{}\n";
 }
 

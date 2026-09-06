@@ -10,6 +10,7 @@ import { assertNoSymlinkComponentsUnderRoot, ensurePrivateDir, fileExists, readP
 import { normalizeClipboardText, normalizeExternalUrl, normalizeSpeechText, parseBrowserTaskContent, parseCalendarEventContent, parseConnectorMessageContent, parseDesktopNotificationContent, parseMailDraftContent } from "../core/actions.js";
 import { normalizePersonalizationState } from "../core/personalization.js";
 import { nowIso } from "../utils/text.js";
+import { validateGlobalsState } from "../core/globals.js";
 const SESSION_WARN_BYTES = 5_000_000;
 const SESSION_WARN_LINES = 1_000;
 const SESSION_REPAIR_KEEP_LINES = 1_000;
@@ -44,6 +45,9 @@ export async function stateHealthItems(config) {
     }
     if (await isRegularStateDirectory("personalization", config.personalization.dir, config.assistant.workdir, items)) {
         await checkJsonFile("personalization", join(config.personalization.dir, "settings.json"), "personalization-state", config.assistant.workdir, items);
+    }
+    if (await isRegularStateDirectory("globals", config.globals.dir, config.assistant.workdir, items)) {
+        await checkJsonFile("globals", join(config.globals.dir, "globals.json"), "globals-state", config.assistant.workdir, items);
     }
     if (await isRegularStateDirectory("scheduler", config.scheduler.dir, config.assistant.workdir, items)) {
         await checkJsonFile("scheduler", join(config.scheduler.dir, "tasks.json"), "scheduler-tasks", config.assistant.workdir, items);
@@ -363,6 +367,8 @@ function validateJsonShape(value, kind) {
         return validateArrayItems(value, "pending action", validatePendingAction);
     if (kind === "personalization-state")
         return validatePersonalizationState(value);
+    if (kind === "globals-state")
+        return validateGlobalsState(value);
     return validateAccessState(value);
 }
 function validateArrayItems(value, label, validate) {
@@ -655,6 +661,8 @@ function repairedContent(plan) {
         return `${JSON.stringify({ peers: [], codes: [] }, null, 2)}\n`;
     if (plan.kind === "personalization-state")
         return `${JSON.stringify({ version: 1, settings: [] }, null, 2)}\n`;
+    if (plan.kind === "globals-state")
+        return `${JSON.stringify({ schemaVersion: 1, settings: {} }, null, 2)}\n`;
     return "{}\n";
 }
 function formatStateHealthReport(items, summary, repairs, repairRequested, dryRun) {

@@ -119,4 +119,5 @@ test("prompt safety contract preserves the local-CLI and approval boundaries", (
   assert.match(contract, /untrusted data/);
   assert.match(contract, /model API keys/);
   assert.match(contract, /\/tool or \/propose/);
+  assert.match(contract, /operator globals/);
 });

@@ -13,6 +13,19 @@ test("configValidationItems passes the default config shape", () => {
   assert.ok(items.some((item) => item.severity === "pass" && item.path === "config"));
   assert.equal(items.some((item) => item.severity === "fail"), false);
 });
+test("configValidationItems fails core local CLI basename mismatches and model API key env", () => {
+  const config = {
+    ...DEFAULT_CONFIG,
+    providers: {
+      ...DEFAULT_CONFIG.providers,
+      cursor: { ...DEFAULT_CONFIG.providers.cursor, command: "curl" },
+      grok: { ...DEFAULT_CONFIG.providers.grok, env: { XAI_API_KEY: "example" } }
+    }
+  };
+  const items = configValidationItems(config);
+  assert.ok(items.some((item) => item.severity === "fail" && item.path === "providers.cursor.command" && /cursor-agent/.test(item.message)));
+  assert.ok(items.some((item) => item.severity === "fail" && item.path === "providers.grok.env.XAI_API_KEY"));
+});
 
 test("configValidationItems reports actionable shape failures", () => {
   const config = {

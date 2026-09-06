@@ -19,16 +19,18 @@ export async function setupReport(force = false): Promise<string> {
   const skillsResult = await installBundledSkills(force);
   const config = await loadConfig();
   const envResult = await writeEnvTemplate(config);
+  const npmrcResult = await ensureLocalNpmrc();
   return [
     "Viser setup",
     initResult,
     envResult,
+    npmrcResult,
     skillsResult,
     "",
     doctorReport(config),
     "",
     "Next steps:",
-    "1. Run `codex login`, `gemini`, `claude`, and/or `grok login` in a normal terminal to complete local CLI account login.",
+    "1. Run `codex login`, `gemini`, `claude`, `grok login`, and/or `cursor-agent` in a normal terminal to complete local CLI account login.",
     "2. Put TELEGRAM_BOT_TOKEN and DISCORD_BOT_TOKEN in `.env`, your shell, or a `VISER_ENV` file if you want messaging.",
     "3. Confirm env/token loading without leaking secrets: `viser env-check`.",
     "4. Verify provider runtime and live connector tokens with `viser provider-guide --probe` or `viser verify --live --probe-all-providers`.",
@@ -44,7 +46,14 @@ export async function setupReport(force = false): Promise<string> {
   ].join("\n");
 }
 
-async function installBundledSkills(force: boolean): Promise<string> {
+export async function ensureLocalNpmrc(): Promise<string> {
+  const target = resolve(process.cwd(), ".npmrc");
+  if (fileExists(target)) return "Local .npmrc already present; left unchanged.";
+  await writePrivateFile(target, "cache=.viser/npm-cache\n");
+  return "Local .npmrc created (npm cache pinned to .viser/npm-cache).";
+}
+
+export async function installBundledSkills(force: boolean): Promise<string> {
   const sourceRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "skills");
   const targetRoot = resolve(process.cwd(), ".viser", "skills");
   if (!fileExists(sourceRoot)) return "Bundled skills were not found; skipping starter skill install.";

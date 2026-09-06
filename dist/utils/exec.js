@@ -83,13 +83,25 @@ export async function runCommand(options) {
             });
         });
         if (options.stdin)
-            child.stdin.end(options.stdin);
+            child.stdin.end(options.stdin, () => undefined);
         else
             child.stdin.end();
+        child.stdin.on("error", (error) => {
+            if (isIgnorableStdinError(error))
+                return;
+            if (settled)
+                return;
+            settled = true;
+            clearTimeout(timeout);
+            reject(error);
+        });
     });
 }
 function isBenignStdinClose(error) {
     return error.code === "EPIPE" || error.code === "ERR_STREAM_DESTROYED";
+}
+function isIgnorableStdinError(error) {
+    return isNodeError(error) && (error.code === "EPIPE" || error.code === "ERR_STREAM_DESTROYED");
 }
 function commandEnv(options) {
     const output = options.inheritEnv === false ? {} : { ...process.env };

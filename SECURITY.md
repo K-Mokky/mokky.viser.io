@@ -1,7 +1,7 @@
 # Security Policy
 
 Viser is a local-first assistant runtime. It is designed to call already logged-in
-local AI CLIs (`codex`, `gemini`, `claude`, `grok`) instead of GPT/Gemini/Claude/Grok model
+local AI CLIs (`codex`, `gemini`, `claude`, `grok`, `cursor-agent`) instead of GPT/Gemini/Claude/Grok/Cursor model
 HTTP APIs or model API keys. Please do not file reports or examples that include
 real tokens, `.env` contents, private `.viser/` state, `.omx/` runtime state,
 session transcripts, personal chat identifiers, or other personal data.
@@ -33,11 +33,11 @@ If a secret was exposed, rotate it before sharing the report.
 
 Viser intentionally keeps these boundaries small and auditable:
 
-1. **No model API key path**: core GPT/Codex, Gemini, Claude, and Grok/xAI routes must use
-   exact local CLI command basenames (`codex`, `gemini`, `claude`, `grok`). Audit and
+1. **No model API key path**: core GPT/Codex, Gemini, Claude, Grok/xAI, and Cursor routes must use
+   exact local CLI command basenames (`codex`, `gemini`, `claude`, `grok`, `cursor-agent`). Audit and
    strict release evidence fail if model API key env names such as
    `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`,
-   `GOOGLE_GENERATIVE_AI_API_KEY`, `XAI_API_KEY`, or `GROK_API_KEY` are present in
+   `GOOGLE_GENERATIVE_AI_API_KEY`, `XAI_API_KEY`, `GROK_API_KEY`, or `CURSOR_API_KEY` are present in
    active/public/provider env surfaces.
 2. **Prompt-injection guard**: untrusted user, personalization, memory, session, skill, and plugin
    content is fenced before provider handoff. High-risk instruction override,
@@ -95,6 +95,36 @@ Viser intentionally keeps these boundaries small and auditable:
 9. **Provider environment minimization**: provider subprocesses do not inherit
    shell secrets by default. Explicit provider env is redacted in output and is
    rejected when it contains model API key names.
+7. **Outbound provider throttle**: `assistant.providerMinIntervalMs` enforces a
+   minimum spacing between local provider CLI invocations so durable jobs, team
+   workflows, or a messenger bridge cannot burst a single subscription account.
+
+## Provider subscription terms and account-ban risk
+
+Viser deliberately uses the official, logged-in provider CLIs (`codex`, `gemini`,
+`claude`, `grok`, `cursor-agent`) instead of reverse-engineered endpoints, stolen tokens, or
+detection-evasion. There is **no ban-circumvention code**, because evading a
+provider's abuse detection is itself a terms-of-service violation and a fast path
+to a ban. Using the sanctioned CLI with your own login is the lowest-risk method,
+but it does not remove every account-ban risk:
+
+- **Relaying to other people is the biggest risk.** A personal subscription is
+  generally licensed for one human. Bridging your logged-in CLI so other chat
+  peers (a Discord channel, a group, friends) can use it can be treated as
+  sharing or reselling access and is a common ban reason. Audit emits a warning
+  whenever a connector is enabled until you set `connectors.acknowledgeRelayToS`
+  to `true`. Prefer keeping paired peers limited to yourself.
+- **Unattended automation can look like abuse.** Always-on `gateway`, `scheduler`,
+  `service` (launchd/systemd/Windows), and the durable job worker make automated
+  calls. Subscription CLIs are usually intended for interactive personal use;
+  sustained headless automation may be flagged. Use `assistant.providerMinIntervalMs`
+  to throttle and keep volume human-scale.
+- **Bursty workflows multiply calls.** `team`, `fix-loop`, and `supervisor`
+  enqueue several provider jobs at once. Keep `jobs.concurrency` low (default `1`)
+  and a non-zero throttle interval.
+
+These are operator responsibilities: Viser surfaces and bounds the risk but cannot
+read your provider's current terms. Review the terms for each CLI you enable.
 
 ## Required checks before public disclosure or release
 

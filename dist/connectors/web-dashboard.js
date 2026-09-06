@@ -822,7 +822,7 @@ function dashboardJsonSchema() {
             },
             state: {
                 type: "object",
-                required: ["currentSessionHistory", "savedSessions", "memories", "skills", "plugins", "schedules", "jobs", "pendingApprovals", "operatorActivity"],
+                required: ["currentSessionHistory", "savedSessions", "memories", "personalization", "globals", "skills", "plugins", "schedules", "jobs", "pendingApprovals", "operatorActivity"],
                 additionalProperties: true
             },
             providers: {
@@ -969,6 +969,7 @@ function dashboardHtml() {
         card('Approvals', String(data.state.pendingApprovals.count), data.state.pendingApprovals.count ? 'warn' : 'ok'),
         card('Activity', String((data.state.operatorActivity && data.state.operatorActivity.count) || 0), (data.state.operatorActivity && data.state.operatorActivity.items && data.state.operatorActivity.items.some((item) => item.tone === 'bad')) ? 'bad' : 'ok'),
         card('Memories', String(data.state.memories.count), 'ok'),
+        card('Globals', String(data.state.globals.count), 'ok'),
         card('Skills', String(data.state.skills.count), 'ok'),
         card('Plugins', String(data.state.plugins.count), 'ok'),
         card('Job worker', data.runtime.jobWorker.enabled ? 'parallelism ' + data.runtime.jobWorker.concurrency : 'disabled', data.runtime.jobWorker.enabled ? 'ok' : 'warn'),
@@ -1797,7 +1798,7 @@ export function dashboardCanvasSvg(data) {
         svgHub(372, 168, "Local control plane", [
             `providers ${providers}`,
             `schedules ${schedules}`,
-            `skills ${data.state.skills.count} · plugins ${data.state.plugins.count}`
+            `skills ${data.state.skills.count} · plugins ${data.state.plugins.count} · globals ${data.state.globals.count}`
         ]),
         `</svg>`
     ].join("\n");

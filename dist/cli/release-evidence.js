@@ -15,7 +15,7 @@ import { isModelApiKeyEnvKey } from "../core/model-api-policy.js";
 const RELEASE_CREATOR = "KMokky";
 const RELEASE_ASSISTANT = "Viser";
 const REQUIRED_PUBLIC_FILES = ["README.md", "SECURITY.md", "PRIVACY.md", "CONTRIBUTING.md", "LICENSE", "aimake.md"];
-const REQUIRED_PACKAGE_FILES = [".env.example", "README.md", "SECURITY.md", "PRIVACY.md", "CONTRIBUTING.md", "assets", "config", "plugins", "skills", "dist", "src", "tools", "tsconfig.build.json", "tsconfig.json"];
+const REQUIRED_PACKAGE_FILES = [".env.example", "README.md", "SECURITY.md", "PRIVACY.md", "CONTRIBUTING.md", "assets", "config", "docs", "plugins", "skills", "dist", "src", "tools", "tsconfig.build.json", "tsconfig.json"];
 const REQUIRED_GITHUB_TEMPLATE_FILES = [
     ".github/ISSUE_TEMPLATE/config.yml",
     ".github/ISSUE_TEMPLATE/bug_report.yml",
@@ -70,7 +70,7 @@ export async function releaseEvidence(config, options = {}) {
         safeToPaste: true,
         assistantName: RELEASE_ASSISTANT,
         creator: RELEASE_CREATOR,
-        modelAccessRule: "Logged-in local CLI providers only; no GPT/Gemini/Claude model HTTP API keys are required by Viser.",
+        modelAccessRule: "Logged-in local CLI providers only; no GPT/Gemini/Claude/Grok/Cursor model HTTP API keys are required by Viser.",
         package: {
             name: stringValue(packageJson?.name),
             version: stringValue(packageJson?.version),
@@ -283,6 +283,7 @@ async function objectiveCoverageChecks(rootDir, config) {
     addCheck(checks, "objective", await fileExists(join(rootDir, "src", "core", "scheduler.ts")), "scheduler source is present");
     addCheck(checks, "objective", await fileExists(join(rootDir, "src", "cli", "benchmark.ts")), "benchmark harness source is present");
     addCheck(checks, "objective", await fileExists(join(rootDir, "src", "core", "prompt-guard.ts")), "prompt injection guard source is present");
+    addCheck(checks, "objective", await fileExists(join(rootDir, "src", "core", "globals.ts")), "operator globals store source is present");
     addCheck(checks, "objective", await fileExists(join(rootDir, "aimake.md")), "build process log aimake.md is present");
     return checks;
 }
@@ -570,14 +571,15 @@ function objectiveMatrix(input) {
                 /Gemini route uses exact logged-in local gemini CLI provider/u,
                 /Claude route uses exact logged-in local claude CLI provider/u,
                 /Grok\/xAI route uses exact logged-in local grok CLI provider/u,
+                /Cursor route uses exact logged-in local cursor-agent CLI provider/u,
                 /\.env\.example excludes model API key variables/u,
                 /config example provider env excludes model API key variables/u
             ]) && !providerProofFailed && input.verifyResult.audit.failCount === 0
                 ? "pass"
                 : "fail",
-            requirement: "GPT/Codex, Gemini, Claude, and Grok/xAI use logged-in local CLIs instead of model API keys",
+            requirement: "GPT/Codex, Gemini, Claude, Grok/xAI, and Cursor use logged-in local CLIs instead of model API keys",
             evidence: [
-                "core GPT/Codex, Gemini, Claude, and Grok/xAI routes use exact local command basenames: codex, gemini, claude, grok",
+                "core GPT/Codex, Gemini, Claude, Grok/xAI, and Cursor routes use exact local command basenames: codex, gemini, claude, grok, cursor-agent",
                 `audit: ${input.verifyResult.audit.verdict} (${input.verifyResult.audit.passCount} pass, ${input.verifyResult.audit.warnCount} warn, ${input.verifyResult.audit.failCount} fail)`,
                 "public examples exclude model API key variables",
                 ...(providerProbeRequested
@@ -710,6 +712,18 @@ function objectiveMatrix(input) {
             status: hasPassingCheck(input.checks, "objective", /build process log aimake\.md is present/u) ? "pass" : "fail",
             requirement: "Build process is recorded",
             evidence: ["aimake.md is present and maintained with staged implementation notes"],
+            remaining: []
+        },
+        {
+            id: "operator-globals",
+            status: hasPassingCheck(input.checks, "objective", /operator globals store source is present/u) && allSmokePass(input.smokeChecks, ["globals"])
+                ? "pass"
+                : "fail",
+            requirement: "Operator globals persist persona, speech style, personality, and user facts across sessions",
+            evidence: [
+                "src/core/globals.ts is present",
+                "local smoke proves /global set persists and injects into later provider prompts"
+            ],
             remaining: []
         },
         {

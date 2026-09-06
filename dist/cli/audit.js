@@ -4,7 +4,7 @@
 // Readiness answers "can it run?". Audit answers "is this configuration safe
 // enough to leave running?". The checks are intentionally deterministic and
 // local so they can run before any provider or messenger token is available.
-import { constants } from "node:fs";
+import { constants, readFileSync } from "node:fs";
 import { access, lstat, readFile, readdir } from "node:fs/promises";
 import { basename, delimiter, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 import { cwd } from "node:process";
@@ -29,6 +29,7 @@ const RELEASE_SCAN_ENTRIES = [
     "SECURITY.md",
     "LICENSE",
     "aimake.md",
+    "docs",
     "config",
     "package.json",
     "package-lock.json",
@@ -129,7 +130,7 @@ const SENSITIVE_RELEASE_PATTERNS = [
     },
     {
         id: "public-secret-env-assignment",
-        pattern: /\b(?:OPENAI_API_KEY|ANTHROPIC_API_KEY|GEMINI_API_KEY|GOOGLE_GENERATIVE_AI_API_KEY|GOOGLE_API_KEY|XAI_API_KEY|GROK_API_KEY|DISCORD_BOT_TOKEN|TELEGRAM_BOT_TOKEN|SLACK_BOT_TOKEN|SLACK_APP_TOKEN|MATRIX_ACCESS_TOKEN|SIGNAL_CLI_ACCOUNT|IMESSAGE_CHAT_DB|WHATSAPP_ACCESS_TOKEN|WHATSAPP_PHONE_NUMBER_ID|WHATSAPP_VERIFY_TOKEN|KAKAOTALK_SKILL_TOKEN|GOOGLE_CHAT_WEBHOOK_URL|GOOGLE_CHAT_WEBHOOKS|VISER_WEBHOOK_URL|VISER_WEBHOOKS|VISER_WEBHOOK_INBOUND_TOKEN|HOME_ASSISTANT_BASE_URL|HOME_ASSISTANT_ACCESS_TOKEN|HOME_ASSISTANT_SERVICE|HOME_ASSISTANT_SERVICES|TEAMS_WEBHOOK_URL|TEAMS_WEBHOOKS|MATTERMOST_WEBHOOK_URL|MATTERMOST_WEBHOOKS|SYNOLOGY_CHAT_WEBHOOK_URL|SYNOLOGY_CHAT_WEBHOOKS|ROCKET_CHAT_WEBHOOK_URL|ROCKET_CHAT_WEBHOOKS|FEISHU_WEBHOOK_URL|FEISHU_WEBHOOKS|DINGTALK_WEBHOOK_URL|DINGTALK_WEBHOOKS|WECOM_WEBHOOK_URL|WECOM_WEBHOOKS|ZALO_OA_ACCESS_TOKEN|ZALO_RECIPIENT_ID|ZALO_RECIPIENTS|IRC_HOST|IRC_PORT|IRC_TLS|IRC_NICK|IRC_PASSWORD|IRC_CHANNEL|IRC_CHANNELS|TWITCH_ACCESS_TOKEN|TWITCH_BOT_USERNAME|TWITCH_CHANNEL|TWITCH_CHANNELS|NTFY_BASE_URL|NTFY_TOKEN|NTFY_TOPIC|NTFY_TOPICS|MASTODON_BASE_URL|MASTODON_ACCESS_TOKEN|MASTODON_VISIBILITY|MASTODON_TARGETS|NEXTCLOUD_TALK_BASE_URL|NEXTCLOUD_TALK_USERNAME|NEXTCLOUD_TALK_APP_PASSWORD|NEXTCLOUD_TALK_ROOM_TOKEN|NEXTCLOUD_TALK_ROOMS|WEBEX_ACCESS_TOKEN|ZULIP_SITE_URL|ZULIP_BOT_EMAIL|ZULIP_API_KEY|ZULIP_TARGET|ZULIP_TARGETS|NOTION_TOKEN|NOTION_PAGE_ID|NOTION_PAGES|BRAVE_SEARCH_API_KEY|TAVILY_API_KEY|PERPLEXITY_API_KEY|EXA_API_KEY|FIRECRAWL_API_KEY|OLLAMA_API_KEY|BROWSER_USE_API_KEY|BROWSERBASE_API_KEY|VISER_DASHBOARD_TOKEN|VISER_PROVIDER_SECRET)\s*[:=]\s*["']?(?!(?:redacted|example|demo|dummy|fake|test|placeholder|your-|secret-token|secret-value|sk-test|sk-should-not|shell-secret|tool-api-key|\[REDACTED|<|\$\{|\.\.\.)\b)[A-Za-z0-9+~/][A-Za-z0-9._:+~/ -]{10,}/iu,
+        pattern: /\b(?:OPENAI_API_KEY|ANTHROPIC_API_KEY|GEMINI_API_KEY|GOOGLE_GENERATIVE_AI_API_KEY|GOOGLE_API_KEY|XAI_API_KEY|GROK_API_KEY|CURSOR_API_KEY|DISCORD_BOT_TOKEN|TELEGRAM_BOT_TOKEN|SLACK_BOT_TOKEN|SLACK_APP_TOKEN|MATRIX_ACCESS_TOKEN|SIGNAL_CLI_ACCOUNT|IMESSAGE_CHAT_DB|WHATSAPP_ACCESS_TOKEN|WHATSAPP_PHONE_NUMBER_ID|WHATSAPP_VERIFY_TOKEN|KAKAOTALK_SKILL_TOKEN|GOOGLE_CHAT_WEBHOOK_URL|GOOGLE_CHAT_WEBHOOKS|VISER_WEBHOOK_URL|VISER_WEBHOOKS|VISER_WEBHOOK_INBOUND_TOKEN|HOME_ASSISTANT_BASE_URL|HOME_ASSISTANT_ACCESS_TOKEN|HOME_ASSISTANT_SERVICE|HOME_ASSISTANT_SERVICES|TEAMS_WEBHOOK_URL|TEAMS_WEBHOOKS|MATTERMOST_WEBHOOK_URL|MATTERMOST_WEBHOOKS|SYNOLOGY_CHAT_WEBHOOK_URL|SYNOLOGY_CHAT_WEBHOOKS|ROCKET_CHAT_WEBHOOK_URL|ROCKET_CHAT_WEBHOOKS|FEISHU_WEBHOOK_URL|FEISHU_WEBHOOKS|DINGTALK_WEBHOOK_URL|DINGTALK_WEBHOOKS|WECOM_WEBHOOK_URL|WECOM_WEBHOOKS|ZALO_OA_ACCESS_TOKEN|ZALO_RECIPIENT_ID|ZALO_RECIPIENTS|IRC_HOST|IRC_PORT|IRC_TLS|IRC_NICK|IRC_PASSWORD|IRC_CHANNEL|IRC_CHANNELS|TWITCH_ACCESS_TOKEN|TWITCH_BOT_USERNAME|TWITCH_CHANNEL|TWITCH_CHANNELS|NTFY_BASE_URL|NTFY_TOKEN|NTFY_TOPIC|NTFY_TOPICS|MASTODON_BASE_URL|MASTODON_ACCESS_TOKEN|MASTODON_VISIBILITY|MASTODON_TARGETS|NEXTCLOUD_TALK_BASE_URL|NEXTCLOUD_TALK_USERNAME|NEXTCLOUD_TALK_APP_PASSWORD|NEXTCLOUD_TALK_ROOM_TOKEN|NEXTCLOUD_TALK_ROOMS|WEBEX_ACCESS_TOKEN|ZULIP_SITE_URL|ZULIP_BOT_EMAIL|ZULIP_API_KEY|ZULIP_TARGET|ZULIP_TARGETS|NOTION_TOKEN|NOTION_PAGE_ID|NOTION_PAGES|BRAVE_SEARCH_API_KEY|TAVILY_API_KEY|PERPLEXITY_API_KEY|EXA_API_KEY|FIRECRAWL_API_KEY|OLLAMA_API_KEY|BROWSER_USE_API_KEY|BROWSERBASE_API_KEY|VISER_DASHBOARD_TOKEN|VISER_PROVIDER_SECRET)\s*[:=]\s*["']?(?!(?:redacted|example|demo|dummy|fake|test|placeholder|your-|secret-token|secret-value|sk-test|sk-should-not|shell-secret|tool-api-key|\[REDACTED|<|\$\{|\.\.\.)\b)[A-Za-z0-9+~/][A-Za-z0-9._:+~/ -]{10,}/iu,
         next: "Keep real tokens and API keys in private .env files only; public examples must use placeholders."
     }
 ];
@@ -444,7 +445,7 @@ function providerShapeAudit(provider) {
             severity: "fail",
             area: "provider",
             message: `${provider.id}: provider.env contains model API key variables (${modelApiKeyEnvKeys.join(", ")})`,
-            next: "Remove model API key env values. Viser must call already logged-in local GPT/Gemini/Claude CLIs instead of model HTTP APIs."
+            next: "Remove model API key env values. Viser must call already logged-in local GPT/Gemini/Claude/Grok/Cursor CLIs instead of model HTTP APIs."
         });
     }
     if (provider.timeoutMs < 5_000) {
@@ -723,6 +724,19 @@ function auditAccessAndConnectors(config, configFile, items) {
     }
     if (config.access.pairingCodeTtlMs > 60 * 60 * 1000) {
         items.push({ severity: "warn", area: "access", message: "pairing code TTL exceeds 1 hour", next: "Short-lived pairing codes reduce takeover risk." });
+    }
+    if (anyConnectorEnabled) {
+        if (config.connectors.acknowledgeRelayToS === true) {
+            items.push({ severity: "pass", area: "access", message: "messenger relay ToS/ban risk acknowledged (connectors.acknowledgeRelayToS=true)" });
+        }
+        else {
+            items.push({
+                severity: "warn",
+                area: "access",
+                message: "messenger connector relays your single-seat provider subscription to chat peers",
+                next: "Relaying a personal Codex/Claude/Gemini login to other people can violate provider ToS and risk account bans; keep peers limited to yourself, then set connectors.acknowledgeRelayToS=true to acknowledge."
+            });
+        }
     }
     if (config.connectors.discord.enabled && !config.connectors.discord.prefix.trim()) {
         items.push({ severity: "fail", area: "discord", message: "Discord prefix is empty while Discord is enabled" });
@@ -1974,15 +1988,45 @@ function localWorkspaceTokenPatterns(root, homeRoot) {
     const rel = relative(home, resolvedRoot);
     if (!rel || rel.startsWith("..") || isAbsolute(rel))
         return [];
+    const identity = projectPublicIdentityTokens(resolvedRoot);
     const tokens = new Set(rel
         .split(/[\\/]+/u)
         .map((part) => part.trim())
-        .filter((part) => isSensitiveLocalPathToken(part)));
+        .filter((part) => isSensitiveLocalPathToken(part) && !identity.has(part.toLowerCase())));
     return [...tokens].map((token) => ({
         id: "local-workspace-token",
         pattern: new RegExp(`\\b${escapeRegExp(token)}\\b`, "iu"),
         next: "Replace private local workspace path fragments with generic fixture names such as demo-workspace or example-project."
     }));
+}
+// The project's own published identity (package name and repository owner/name)
+// legitimately appears in onboarding docs, so it must not be flagged as a leaked
+// private local workspace token.
+function projectPublicIdentityTokens(root) {
+    const tokens = new Set();
+    try {
+        const pkg = JSON.parse(readFileSync(join(root, "package.json"), "utf8"));
+        if (typeof pkg.name === "string" && pkg.name.trim())
+            tokens.add(pkg.name.trim().toLowerCase());
+        const repoUrl = typeof pkg.repository === "string"
+            ? pkg.repository
+            : pkg.repository && typeof pkg.repository === "object" && typeof pkg.repository.url === "string"
+                ? pkg.repository.url
+                : undefined;
+        if (repoUrl) {
+            const cleaned = repoUrl.replace(/\.git$/iu, "").replace(/[#?].*$/u, "");
+            const segments = cleaned.split(/[\\/]+/u).map((part) => part.trim()).filter(Boolean);
+            for (const segment of segments.slice(-2)) {
+                const lower = segment.toLowerCase();
+                if (lower && !lower.includes(":") && lower.length >= 2)
+                    tokens.add(lower);
+            }
+        }
+    }
+    catch {
+        // No readable package.json under this root: contribute no identity allowlist.
+    }
+    return tokens;
 }
 function isSensitiveLocalPathToken(value) {
     const lower = value.toLowerCase();

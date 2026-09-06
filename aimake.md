@@ -3417,3 +3417,11 @@ Verification:
 - Restored native always-on install: `viser service install` / `service-run` after the live provider-proof gate. Blocked `service-run` still exits 0 to avoid launchd restart loops.
 - Added `assistant.autonomy` (`enabled`, `interval`, `command`). `/autonomy` and gateway startup schedule an approval-gated `/curate-skills` learning loop. File writes still require `/approve`.
 - Default fallback route now includes `grok`. Setup/README/SECURITY/CONTRIBUTING document `grok login` and `viser service install`.
+## 2026-08-23 253단계: Grok/Cursor local CLI routes and operator globals
+
+- 남은 제품 갭은 GPT/Gemini/Claude 외 Grok/Cursor 구독 CLI 경로와, 세션을 넘기는 always-on 페르소나였다.
+- `CORE_LOCAL_CLI_ROUTES`에 `grok`/`cursor-agent`를 추가하고 default/example config, audit, release-evidence, onboard/setup 안내에 같은 basename 정책을 연결했다. model API key 금지는 `XAI_API_KEY`/`GROK_API_KEY`/`CURSOR_API_KEY`까지 확장했다.
+- `GlobalsStore`는 `.viser/globals/globals.json`에 tone/personality/style/user/facts를 저장하고, prompt safety contract 다음 trusted runtime policy로 매 요청에 주입한다. `/global set`/`clear`는 CLI 전용이고, instruction-override와 model API key 지시는 저장·주입을 거부한다. config load는 core CLI basename mismatch와 provider env의 model API key를 fail한다.
+- Discord/Telegram hanging fetch가 Node test runner 이벤트 루프를 붙잡던 문제를 `fetchWithTimeout` Promise.race로 고쳤고, probe CLI stdin EPIPE는 무시한다.
+- 파트별 제작 기록은 `docs/build/`에 mermaid/SVG와 함께 남겼다. Grok/Cursor는 기본 fallback 목록에 넣지 않고, 설치된 구독 CLI만 `--provider` 또는 `fallbackProviders`로 선택한다.
+- 검증: `tsc --noEmit` pass, `npm test` 466 pass. live provider login proof는 이 환경에 없어 release-evidence remaining proof로 남긴다.
