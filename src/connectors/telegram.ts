@@ -9,6 +9,7 @@ import { connectorInputLimitMessage, connectorInputTooLong } from "./input-polic
 import { ConnectorRateLimiter, connectorRateLimitMessage } from "./rate-limit.ts";
 import { DEFAULT_FETCH_TIMEOUT_MS, fetchWithTimeout, type FetchLike } from "../utils/fetch.ts";
 import { chunkText } from "../utils/text.ts";
+import { runInboundAssistantTurn } from "./progress.ts";
 import type { AssistantRuntime } from "../core/assistant.ts";
 import type { AccessConnector, TelegramConnectorConfig } from "../core/types.ts";
 
@@ -131,13 +132,11 @@ export async function handleTelegramUpdate(
     return;
   }
 
-  try {
-    const answer = await assistant.handle(message.text, `telegram:${chatId}`, { source: "telegram" });
-    await sendTelegramMessage(token, chatId, answer);
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    await sendTelegramMessage(token, chatId, `Viser error:\n${detail}`);
-  }
+  const text = message.text;
+  await runInboundAssistantTurn(
+    (chunk) => sendTelegramMessage(token, chatId, chunk),
+    () => assistant.handle(text, `telegram:${chatId}`, { source: "telegram" })
+  );
 }
 
 export function pairingRequiredMessage(connector: AccessConnector): string {

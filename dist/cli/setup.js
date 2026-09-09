@@ -12,6 +12,7 @@ import { doctorReport } from "./doctor.js";
 import { writeEnvTemplate } from "./env-check.js";
 import { writeExampleConfig } from "./init.js";
 import { ensurePrivateDir, fileExists, readRegularFileNoFollow, writePrivateFile } from "../utils/files.js";
+import { formatRemoteOperatorGuidance } from "../utils/remote-access.js";
 export async function setupReport(force = false) {
     const initResult = await writeExampleConfig(force);
     const skillsResult = await installBundledSkills(force);
@@ -40,7 +41,10 @@ export async function setupReport(force = false) {
         "10. Native launchd/systemd/Task Scheduler install is explicit: `viser service install`. Remove it later with `viser service uninstall`.",
         "11. For CLI-only use now, run `viser chat` or `viser ask \"질문\"`.",
         "12. Store durable global style/personality settings with `viser persona tone \"...\"`; store discovered facts with `/remember ... #tag`.",
-        "13. Run `viser next-steps --live --probe-all-providers` anytime for an actionable recovery/launch checklist."
+        "13. Run `viser next-steps --live --probe-all-providers` anytime for an actionable recovery/launch checklist.",
+        "",
+        "SSH / 24h CLI server:",
+        formatRemoteOperatorGuidance({ always: true, port: config.webDashboard.port })
     ].join("\n");
 }
 export async function ensureLocalNpmrc() {

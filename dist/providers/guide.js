@@ -7,6 +7,7 @@
 // uses for normal answers.
 import { probeCliProvider } from "./health.js";
 import { commandExists } from "../utils/exec.js";
+import { formatRemoteOperatorGuidance } from "../utils/remote-access.js";
 export async function providerGuideReport(config, options = {}) {
     const providers = selectProviders(config, options.providerId);
     if (providers.length === 0) {
@@ -19,6 +20,8 @@ export async function providerGuideReport(config, options = {}) {
     return [
         "Viser provider login guide",
         "Model access rule: Viser uses already logged-in local CLIs, not LLM HTTP API keys.",
+        "",
+        ...formatRemoteOperatorGuidance({ always: true, port: config.webDashboard.port }).split("\n"),
         "",
         ...blocks
     ].join("\n");

@@ -12,6 +12,7 @@ import { chunkText } from "../utils/text.js";
 import { connectorInputLimitMessage, connectorInputTooLong } from "./input-policy.js";
 import { ConnectorRateLimiter, connectorRateLimitMessage } from "./rate-limit.js";
 import { pairedMessage, pairingRequiredMessage } from "./telegram.js";
+import { runInboundAssistantTurn } from "./progress.js";
 const LINE_CHUNK_SIZE = 4900;
 const MAX_WEBHOOK_BODY_BYTES = 1_000_000;
 const LINE_REPLY_URL = "https://api.line.me/v2/bot/message/reply";
@@ -118,14 +119,8 @@ export async function handleLineMessage(config, assistant, message, access, rate
         await sendLineResponse(config, peerId, message.replyToken, connectorRateLimitMessage(rate.retryAfterMs), options);
         return;
     }
-    try {
-        const answer = await assistant.handle(normalized, `line:${peerId}`, { source: "line" });
-        await sendLineResponse(config, peerId, message.replyToken, answer, options);
-    }
-    catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
-        await sendLineResponse(config, peerId, message.replyToken, `Viser error:\n${detail}`, options);
-    }
+    const text = normalized;
+    await runInboundAssistantTurn((chunk) => sendLinePushMessage(config, peerId, chunk, options), () => assistant.handle(text, `line:${peerId}`, { source: "line" }), (chunk) => sendLineResponse(config, peerId, message.replyToken, chunk, options));
 }
 export async function sendLinePushMessage(config, peerId, text, options = {}) {
     const safePeerId = normalizeLinePeerId(peerId);

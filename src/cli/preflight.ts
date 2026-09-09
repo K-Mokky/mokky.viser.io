@@ -6,6 +6,7 @@
 // optionally prove provider/login state, then exit with clear launch guidance.
 
 import { verify, type VerifyOptions, type VerifyResult } from "./verify.ts";
+import { formatRemoteOperatorGuidance } from "../utils/remote-access.ts";
 import type { ViserConfig } from "../core/types.ts";
 
 export interface PreflightOptions extends VerifyOptions {}
@@ -47,7 +48,8 @@ export async function preflight(config: ViserConfig, options: PreflightOptions =
       providerProbeRequested
         ? "- Start Viser only in a foreground terminal when ready: `viser`."
         : "- Direct foreground gateway now adds provider proof by default: `viser`.",
-      "- Native always-on install uses `viser service install` after the live provider-proof gate. The process still stops if that service is uninstalled."
+      "- Native always-on install uses `viser service install` after the live provider-proof gate. The process still stops if that service is uninstalled.",
+      ...formatRemoteOperatorGuidance({ always: true, port: config.webDashboard.port }).split("\n").map((line) => `- ${line}`)
     ].join("\n")
   };
 }

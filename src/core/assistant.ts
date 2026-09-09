@@ -12,7 +12,7 @@ import { providerGuideReport, providerIssueAdvice } from "../providers/guide.ts"
 import { commandExists } from "../utils/exec.ts";
 import { appendPrivateFile, readPrivateFileIfExists } from "../utils/files.ts";
 import { formatDuration, nowIso } from "../utils/text.ts";
-import { createConnectorMessageSender, type ConnectorMessageSenderOptions } from "../connectors/notifier.ts";
+import { createConnectorMessageSender, createJobProgressNotifier, type ConnectorMessageSenderOptions } from "../connectors/notifier.ts";
 import { ActionStore, type ActionStoreOptions } from "./actions.ts";
 import { SessionStore } from "./history.ts";
 import { JobStore, parseJobStatus, runQueuedJobs } from "./jobs.ts";
@@ -1366,7 +1366,8 @@ export class AssistantRuntime {
 
     return (await runQueuedJobs(this.jobStore, this, limit, {
       concurrency: parsed.concurrency,
-      maxInputChars: this.config.assistant.maxInputChars
+      maxInputChars: this.config.assistant.maxInputChars,
+      notifier: createJobProgressNotifier(this.config)
     })).lines.join("\n");
   }
 

@@ -5,6 +5,7 @@
 // workers. `preflight` is intentionally no-start: run every safe local gate,
 // optionally prove provider/login state, then exit with clear launch guidance.
 import { verify } from "./verify.js";
+import { formatRemoteOperatorGuidance } from "../utils/remote-access.js";
 export async function preflight(config, options = {}) {
     const result = await verify(config, options);
     const providerProbeRequested = Boolean(options.probeProviders || options.probeAllProviders);
@@ -35,7 +36,8 @@ export async function preflight(config, options = {}) {
             providerProbeRequested
                 ? "- Start Viser only in a foreground terminal when ready: `viser`."
                 : "- Direct foreground gateway now adds provider proof by default: `viser`.",
-            "- Native always-on install uses `viser service install` after the live provider-proof gate. The process still stops if that service is uninstalled."
+            "- Native always-on install uses `viser service install` after the live provider-proof gate. The process still stops if that service is uninstalled.",
+            ...formatRemoteOperatorGuidance({ always: true, port: config.webDashboard.port }).split("\n").map((line) => `- ${line}`)
         ].join("\n")
     };
 }

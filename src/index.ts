@@ -46,13 +46,14 @@ import { runMatrixBridge } from "./connectors/matrix.ts";
 import { runSignalBridge } from "./connectors/signal.ts";
 import { runSlackBridge } from "./connectors/slack.ts";
 import { runGateway } from "./connectors/gateway.ts";
-import { createConnectorNotifier } from "./connectors/notifier.ts";
+import { createConnectorNotifier, createJobProgressNotifier } from "./connectors/notifier.ts";
 import { DEFAULT_WEB_DASHBOARD_HOST, DEFAULT_WEB_DASHBOARD_PORT, startWebDashboard } from "./connectors/web-dashboard.ts";
 import { runMcpStdioServer } from "./connectors/mcp-server.ts";
 import { AccessStore, parseConnector } from "./core/access.ts";
 import { JobRunner, JobStore } from "./core/jobs.ts";
 import { SchedulerRunner } from "./core/scheduler.ts";
 import { loadEnvFile } from "./utils/env.ts";
+import { formatDashboardListenerNotice } from "./utils/remote-access.ts";
 import { fileExists } from "./utils/files.ts";
 import type { EnvLoadResult } from "./utils/env.ts";
 import type { ViserConfig } from "./core/types.ts";
@@ -436,7 +437,7 @@ async function main(): Promise<void> {
         const jobsConfig = jobWorkerConfig(config.jobs, parsed.flags);
         if (!jobsConfig) return;
         if (jobsConfig.enabled && !await foregroundGate("job-worker", config, parsed.flags)) return;
-        await new JobRunner(jobsConfig, assistant, { maxInputChars: config.assistant.maxInputChars }).loop();
+        await new JobRunner(jobsConfig, assistant, { maxInputChars: config.assistant.maxInputChars, notifier: createJobProgressNotifier(config) }).loop();
       }
       return;
     case "cancel-job":
@@ -789,7 +790,7 @@ async function runWebDashboardCommand(
     canvasDir: effectiveConfig.webDashboard.canvasDir,
     authToken: effectiveConfig.webDashboard.authToken
   });
-  console.log(`Viser web dashboard: ${handle.url}`);
+  console.log(formatDashboardListenerNotice(handle.url, effectiveConfig.webDashboard.port));
   console.log("mode: read-only localhost dashboard (no provider calls, no write/action routes)");
   console.log("JSON: /dashboard.json");
   console.log("Press Ctrl+C to stop.");

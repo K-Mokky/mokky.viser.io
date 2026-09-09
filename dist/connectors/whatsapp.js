@@ -11,6 +11,7 @@ import { chunkText } from "../utils/text.js";
 import { pairedMessage, pairingRequiredMessage } from "./telegram.js";
 import { connectorInputLimitMessage, connectorInputTooLong } from "./input-policy.js";
 import { ConnectorRateLimiter, connectorRateLimitMessage } from "./rate-limit.js";
+import { runInboundAssistantTurn } from "./progress.js";
 const WHATSAPP_CHUNK_SIZE = 1024;
 const MAX_WEBHOOK_BODY_BYTES = 1_000_000;
 export async function runWhatsappBridge(config, assistant, access) {
@@ -118,14 +119,8 @@ export async function handleWhatsappMessage(config, assistant, message, access, 
         await sendWhatsappMessage(config, from, connectorRateLimitMessage(rate.retryAfterMs), options);
         return;
     }
-    try {
-        const answer = await assistant.handle(normalized, `whatsapp:${from}`, { source: "whatsapp" });
-        await sendWhatsappMessage(config, from, answer, options);
-    }
-    catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
-        await sendWhatsappMessage(config, from, `Viser error:\n${detail}`, options);
-    }
+    const text = normalized;
+    await runInboundAssistantTurn((chunk) => sendWhatsappMessage(config, from, chunk, options), () => assistant.handle(text, `whatsapp:${from}`, { source: "whatsapp" }));
 }
 export async function sendWhatsappMessage(config, recipientId, text, options = {}) {
     const token = config.accessToken;

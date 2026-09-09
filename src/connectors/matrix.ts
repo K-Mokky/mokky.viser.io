@@ -12,6 +12,7 @@ import { DEFAULT_FETCH_TIMEOUT_MS, fetchWithTimeout, type FetchLike } from "../u
 import { pairedMessage, pairingRequiredMessage } from "./telegram.ts";
 import { connectorInputLimitMessage, connectorInputTooLong } from "./input-policy.ts";
 import { ConnectorRateLimiter, connectorRateLimitMessage } from "./rate-limit.ts";
+import { runInboundAssistantTurn } from "./progress.ts";
 import type { AssistantRuntime } from "../core/assistant.ts";
 import type { MatrixConnectorConfig } from "../core/types.ts";
 
@@ -152,13 +153,11 @@ export async function handleMatrixEvent(
     return;
   }
 
-  try {
-    const answer = await assistant.handle(normalized, `matrix:${roomId}`, { source: "matrix" });
-    await sendMatrixMessage(token, config, roomId, answer);
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    await sendMatrixMessage(token, config, roomId, `Viser error:\n${detail}`);
-  }
+  const text = normalized;
+  await runInboundAssistantTurn(
+    (chunk) => sendMatrixMessage(token, config, roomId, chunk),
+    () => assistant.handle(text, `matrix:${roomId}`, { source: "matrix" })
+  );
 }
 
 export function normalizeMatrixInput(content: string, prefix: string, botUserId?: string): string | undefined {

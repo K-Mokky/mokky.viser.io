@@ -8,6 +8,7 @@ import { auditItems, summarizeAudit } from "./audit.js";
 import { readinessItems, summarizeReadiness } from "./readiness.js";
 import { providerIssueAdvice, providerSmokeCommand } from "../providers/guide.js";
 import { commandExists } from "../utils/exec.js";
+import { formatRemoteOperatorGuidance, loopbackOpenUrl, sshLocalForwardCommand } from "../utils/remote-access.js";
 export async function nextStepsReport(config, options = {}) {
     const readiness = await readinessItems(config, options);
     const audit = await auditItems(config);
@@ -48,7 +49,12 @@ export async function nextStepsReport(config, options = {}) {
         "   - Live provider-proof foreground gateway: `viser gateway`",
         "   - Explicit live provider-proof foreground gateway: `viser gateway --strict --live --probe-all-providers`",
         "   - Unsafe raw foreground gateway for debugging only: `viser gateway --unsafe-skip-gate`",
-        "   - Always-on native service after live provider-proof gate: `viser service install`"
+        "   - Always-on native service after live provider-proof gate: `viser service install`",
+        "   - Linux linger so the systemd --user unit survives SSH logout: `loginctl enable-linger \"$USER\"`",
+        `   - SSH laptop browser: \`${sshLocalForwardCommand(config.webDashboard.port, "USER@HOST")}\` then open ${loopbackOpenUrl(config.webDashboard.port, "/")}`,
+        "",
+        "6. SSH / 24h CLI server",
+        ...formatRemoteOperatorGuidance({ always: true, port: config.webDashboard.port }).split("\n").map((line) => `   ${line}`)
     ].join("\n");
 }
 function providerSteps(config, readiness, options) {

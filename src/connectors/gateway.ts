@@ -14,11 +14,12 @@ import { runKakaotalkBridge } from "./kakaotalk.ts";
 import { runLineBridge } from "./line.ts";
 import { runMatrixBridge } from "./matrix.ts";
 import { runSignalBridge } from "./signal.ts";
-import { createConnectorNotifier } from "./notifier.ts";
+import { createConnectorNotifier, createJobProgressNotifier } from "./notifier.ts";
 import { runSlackBridge } from "./slack.ts";
 import { runTelegramBridge } from "./telegram.ts";
 import { runWhatsappBridge } from "./whatsapp.ts";
 import { startWebDashboard } from "./web-dashboard.ts";
+import { formatDashboardListenerNotice } from "../utils/remote-access.ts";
 import type { AssistantRuntime } from "../core/assistant.ts";
 import type { ViserConfig } from "../core/types.ts";
 
@@ -32,7 +33,7 @@ export async function runGateway(config: ViserConfig, assistant: AssistantRuntim
   }
 
   if (config.jobs.enabled) {
-    tasks.push(new JobRunner(config.jobs, assistant, { maxInputChars: config.assistant.maxInputChars }).loop());
+    tasks.push(new JobRunner(config.jobs, assistant, { maxInputChars: config.assistant.maxInputChars, notifier: createJobProgressNotifier(config) }).loop());
   }
 
   if (config.webDashboard.enabled) {
@@ -44,7 +45,7 @@ export async function runGateway(config: ViserConfig, assistant: AssistantRuntim
       authToken: config.webDashboard.authToken,
       genericWebhook: config.connectors.webhook
     });
-    console.log(`Viser web dashboard is running. url=${handle.url} mode=read-only`);
+    console.log(formatDashboardListenerNotice(handle.url, config.webDashboard.port));
     tasks.push(new Promise<void>((resolve, reject) => {
       handle.server.once("close", () => resolve());
       handle.server.once("error", (error) => reject(error));

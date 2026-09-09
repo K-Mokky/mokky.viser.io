@@ -11,6 +11,7 @@ import { chunkText } from "../utils/text.js";
 import { pairedMessage, pairingRequiredMessage } from "./telegram.js";
 import { connectorInputLimitMessage, connectorInputTooLong } from "./input-policy.js";
 import { ConnectorRateLimiter, connectorRateLimitMessage } from "./rate-limit.js";
+import { runInboundAssistantTurn } from "./progress.js";
 const IMESSAGE_CHUNK_SIZE = 1800;
 const IMESSAGE_QUERY_LIMIT = 50;
 export async function runImessageBridge(config, assistant, access) {
@@ -85,14 +86,8 @@ export async function handleImessageMessage(config, assistant, message, access, 
         await sendImessageMessage(config, handleId, connectorRateLimitMessage(rate.retryAfterMs), options);
         return;
     }
-    try {
-        const answer = await assistant.handle(normalized, `imessage:${handleId}`, { source: "imessage" });
-        await sendImessageMessage(config, handleId, answer, options);
-    }
-    catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
-        await sendImessageMessage(config, handleId, `Viser error:\n${detail}`, options);
-    }
+    const text = normalized;
+    await runInboundAssistantTurn((chunk) => sendImessageMessage(config, handleId, chunk, options), () => assistant.handle(text, `imessage:${handleId}`, { source: "imessage" }));
 }
 export function normalizeImessageInput(content) {
     const trimmed = content.trim();

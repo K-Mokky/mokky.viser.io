@@ -11,6 +11,7 @@ import { DEFAULT_FETCH_TIMEOUT_MS, fetchWithTimeout, type FetchLike } from "../u
 import { pairedMessage, pairingRequiredMessage } from "./telegram.ts";
 import { connectorInputLimitMessage, connectorInputTooLong } from "./input-policy.ts";
 import { ConnectorRateLimiter, connectorRateLimitMessage } from "./rate-limit.ts";
+import { runInboundAssistantTurn } from "./progress.ts";
 import type { AssistantRuntime } from "../core/assistant.ts";
 import type { SlackConnectorConfig } from "../core/types.ts";
 
@@ -169,13 +170,12 @@ export async function handleSlackEvent(
     return;
   }
 
-  try {
-    const answer = await assistant.handle(normalized, `slack:${event.channel}`, { source: "slack" });
-    await sendSlackMessage(token, event.channel, answer);
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    await sendSlackMessage(token, event.channel, `Viser error:\n${detail}`);
-  }
+  const channel = event.channel;
+  const text = normalized;
+  await runInboundAssistantTurn(
+    (chunk) => sendSlackMessage(token, channel, chunk),
+    () => assistant.handle(text, `slack:${channel}`, { source: "slack" })
+  );
 }
 
 export function normalizeSlackInput(

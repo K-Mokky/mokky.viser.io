@@ -14,7 +14,7 @@ import { validateGlobalsState } from "../core/globals.js";
 const SESSION_WARN_BYTES = 5_000_000;
 const SESSION_WARN_LINES = 1_000;
 const SESSION_REPAIR_KEEP_LINES = 1_000;
-const VALID_ACCESS_CONNECTORS = ["telegram", "discord", "slack", "matrix", "signal", "imessage", "whatsapp", "line", "google-chat", "webhook", "home-assistant", "teams", "mattermost", "synology-chat", "rocket-chat", "feishu", "dingtalk", "wecom", "zalo", "irc", "twitch", "ntfy", "mastodon", "nextcloud-talk", "webex", "zulip", "email", "github", "todoist", "notion", "obsidian"];
+const VALID_ACCESS_CONNECTORS = ["telegram", "discord", "slack", "matrix", "signal", "imessage", "whatsapp", "line", "kakaotalk", "google-chat", "webhook", "home-assistant", "teams", "mattermost", "synology-chat", "rocket-chat", "feishu", "dingtalk", "wecom", "zalo", "irc", "twitch", "ntfy", "mastodon", "nextcloud-talk", "webex", "zulip", "email", "github", "todoist", "notion", "obsidian"];
 const VALID_TASK_SOURCES = ["cli", "voice", "web-chat", ...VALID_ACCESS_CONNECTORS, "test"];
 const VALID_DELIVERY_KINDS = ["console", ...VALID_ACCESS_CONNECTORS];
 const VALID_CONNECTOR_PREFIXES = VALID_ACCESS_CONNECTORS.map((connector) => `${connector}:`);
@@ -437,6 +437,14 @@ function validateQueuedJob(value) {
     for (const key of ["providerId", "startedAt", "finishedAt", "nextAttemptAt", "result", "error"]) {
         if (value[key] !== undefined && typeof value[key] !== "string")
             return `${key} must be a string when present`;
+    }
+    if (value.delivery !== undefined) {
+        if (!isPlainObject(value.delivery))
+            return "delivery must be an object when present";
+        if (!VALID_DELIVERY_KINDS.includes(String(value.delivery.kind)))
+            return `delivery.kind must be one of ${VALID_DELIVERY_KIND_LABEL}`;
+        if (value.delivery.targetId !== undefined && typeof value.delivery.targetId !== "string")
+            return "delivery.targetId must be a string when present";
     }
     return undefined;
 }

@@ -1067,7 +1067,7 @@ export interface ToolResult {
 }
 
 export interface ScheduledDelivery {
-  kind: "console" | "telegram" | "discord" | "slack" | "matrix" | "signal" | "imessage" | "whatsapp" | "line" | "google-chat" | "webhook" | "home-assistant" | "teams" | "mattermost" | "synology-chat" | "rocket-chat" | "feishu" | "dingtalk" | "wecom" | "zalo" | "irc" | "twitch" | "ntfy" | "mastodon" | "nextcloud-talk" | "webex" | "zulip" | "email" | "github" | "todoist" | "notion" | "obsidian";
+  kind: "console" | "telegram" | "discord" | "slack" | "matrix" | "signal" | "imessage" | "whatsapp" | "line" | "kakaotalk" | "google-chat" | "webhook" | "home-assistant" | "teams" | "mattermost" | "synology-chat" | "rocket-chat" | "feishu" | "dingtalk" | "wecom" | "zalo" | "irc" | "twitch" | "ntfy" | "mastodon" | "nextcloud-talk" | "webex" | "zulip" | "email" | "github" | "todoist" | "notion" | "obsidian";
   targetId?: string;
 }
 
@@ -1104,6 +1104,7 @@ export interface QueuedJob {
   nextAttemptAt?: string;
   result?: string;
   error?: string;
+  delivery?: ScheduledDelivery;
 }
 
 export interface PendingAction {

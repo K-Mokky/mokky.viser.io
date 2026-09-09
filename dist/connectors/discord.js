@@ -8,6 +8,7 @@ import { DEFAULT_FETCH_TIMEOUT_MS, fetchWithTimeout } from "../utils/fetch.js";
 import { pairedMessage, pairingRequiredMessage } from "./telegram.js";
 import { connectorInputLimitMessage, connectorInputTooLong } from "./input-policy.js";
 import { ConnectorRateLimiter, connectorRateLimitMessage } from "./rate-limit.js";
+import { runInboundAssistantTurn } from "./progress.js";
 const DISCORD_GATEWAY_URL = "wss://gateway.discord.gg/?v=10&encoding=json";
 const DISCORD_API_BASE = "https://discord.com/api/v10";
 const INTENTS = 1 | 512 | 4096 | 32768; // guilds, guild messages, DMs, message content
@@ -126,14 +127,8 @@ export async function handleDiscordMessage(token, config, assistant, message, bo
         await sendDiscordMessage(token, message.channel_id, connectorRateLimitMessage(rate.retryAfterMs));
         return;
     }
-    try {
-        const answer = await assistant.handle(normalized, `discord:${message.channel_id}`, { source: "discord" });
-        await sendDiscordMessage(token, message.channel_id, answer);
-    }
-    catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
-        await sendDiscordMessage(token, message.channel_id, `Viser error:\n${detail}`);
-    }
+    const text = normalized;
+    await runInboundAssistantTurn((chunk) => sendDiscordMessage(token, message.channel_id, chunk), () => assistant.handle(text, `discord:${message.channel_id}`, { source: "discord" }));
 }
 export function normalizeDiscordInput(content, prefix, botUserId, isGuild) {
     const trimmed = content.trim();

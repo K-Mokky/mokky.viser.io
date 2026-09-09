@@ -7,6 +7,7 @@ import { connectorInputLimitMessage, connectorInputTooLong } from "./input-polic
 import { ConnectorRateLimiter, connectorRateLimitMessage } from "./rate-limit.js";
 import { DEFAULT_FETCH_TIMEOUT_MS, fetchWithTimeout } from "../utils/fetch.js";
 import { chunkText } from "../utils/text.js";
+import { runInboundAssistantTurn } from "./progress.js";
 const TELEGRAM_RETRY_DELAY_MS = 5000;
 const TELEGRAM_LONG_POLL_MARGIN_MS = 5_000;
 export async function runTelegramBridge(config, assistant, access) {
@@ -78,14 +79,8 @@ export async function handleTelegramUpdate(token, config, assistant, update, acc
         await sendTelegramMessage(token, chatId, connectorRateLimitMessage(rate.retryAfterMs));
         return;
     }
-    try {
-        const answer = await assistant.handle(message.text, `telegram:${chatId}`, { source: "telegram" });
-        await sendTelegramMessage(token, chatId, answer);
-    }
-    catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
-        await sendTelegramMessage(token, chatId, `Viser error:\n${detail}`);
-    }
+    const text = message.text;
+    await runInboundAssistantTurn((chunk) => sendTelegramMessage(token, chatId, chunk), () => assistant.handle(text, `telegram:${chatId}`, { source: "telegram" }));
 }
 export function pairingRequiredMessage(connector) {
     return [

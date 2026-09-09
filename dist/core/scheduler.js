@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { appendPrivateFile, ensurePrivateDir, readPrivateFileIfExists, writePrivateFile } from "../utils/files.js";
 import { nowIso } from "../utils/text.js";
 import { isProviderFailureOutput } from "./provider-output.js";
+import { deliveryForSession } from "./delivery.js";
 const SCHEDULE_FAILURE_BASE_BACKOFF_MS = 60_000;
 const SCHEDULE_FAILURE_MAX_BACKOFF_MS = 60 * 60_000;
 const SCHEDULE_RUN_LOG_OUTPUT_MAX_CHARS = 4_000;
@@ -194,71 +195,7 @@ export function parseScheduleInput(input, context) {
     }
     throw new Error("Schedule mode must be 'every' or 'at'.");
 }
-export function deliveryForSession(sessionId) {
-    if (sessionId.startsWith("telegram:"))
-        return { kind: "telegram", targetId: sessionId.slice("telegram:".length) };
-    if (sessionId.startsWith("discord:"))
-        return { kind: "discord", targetId: sessionId.slice("discord:".length) };
-    if (sessionId.startsWith("slack:"))
-        return { kind: "slack", targetId: sessionId.slice("slack:".length) };
-    if (sessionId.startsWith("matrix:"))
-        return { kind: "matrix", targetId: sessionId.slice("matrix:".length) };
-    if (sessionId.startsWith("signal:"))
-        return { kind: "signal", targetId: sessionId.slice("signal:".length) };
-    if (sessionId.startsWith("imessage:"))
-        return { kind: "imessage", targetId: sessionId.slice("imessage:".length) };
-    if (sessionId.startsWith("whatsapp:"))
-        return { kind: "whatsapp", targetId: sessionId.slice("whatsapp:".length) };
-    if (sessionId.startsWith("line:"))
-        return { kind: "line", targetId: sessionId.slice("line:".length) };
-    if (sessionId.startsWith("google-chat:"))
-        return { kind: "google-chat", targetId: sessionId.slice("google-chat:".length) };
-    if (sessionId.startsWith("webhook:"))
-        return { kind: "webhook", targetId: sessionId.slice("webhook:".length) };
-    if (sessionId.startsWith("home-assistant:"))
-        return { kind: "home-assistant", targetId: sessionId.slice("home-assistant:".length) };
-    if (sessionId.startsWith("teams:"))
-        return { kind: "teams", targetId: sessionId.slice("teams:".length) };
-    if (sessionId.startsWith("mattermost:"))
-        return { kind: "mattermost", targetId: sessionId.slice("mattermost:".length) };
-    if (sessionId.startsWith("synology-chat:"))
-        return { kind: "synology-chat", targetId: sessionId.slice("synology-chat:".length) };
-    if (sessionId.startsWith("rocket-chat:"))
-        return { kind: "rocket-chat", targetId: sessionId.slice("rocket-chat:".length) };
-    if (sessionId.startsWith("feishu:"))
-        return { kind: "feishu", targetId: sessionId.slice("feishu:".length) };
-    if (sessionId.startsWith("dingtalk:"))
-        return { kind: "dingtalk", targetId: sessionId.slice("dingtalk:".length) };
-    if (sessionId.startsWith("wecom:"))
-        return { kind: "wecom", targetId: sessionId.slice("wecom:".length) };
-    if (sessionId.startsWith("zalo:"))
-        return { kind: "zalo", targetId: sessionId.slice("zalo:".length) };
-    if (sessionId.startsWith("irc:"))
-        return { kind: "irc", targetId: sessionId.slice("irc:".length) };
-    if (sessionId.startsWith("twitch:"))
-        return { kind: "twitch", targetId: sessionId.slice("twitch:".length) };
-    if (sessionId.startsWith("ntfy:"))
-        return { kind: "ntfy", targetId: sessionId.slice("ntfy:".length) };
-    if (sessionId.startsWith("mastodon:"))
-        return { kind: "mastodon", targetId: sessionId.slice("mastodon:".length) };
-    if (sessionId.startsWith("nextcloud-talk:"))
-        return { kind: "nextcloud-talk", targetId: sessionId.slice("nextcloud-talk:".length) };
-    if (sessionId.startsWith("webex:"))
-        return { kind: "webex", targetId: sessionId.slice("webex:".length) };
-    if (sessionId.startsWith("zulip:"))
-        return { kind: "zulip", targetId: sessionId.slice("zulip:".length) };
-    if (sessionId.startsWith("email:"))
-        return { kind: "email", targetId: sessionId.slice("email:".length) };
-    if (sessionId.startsWith("github:"))
-        return { kind: "github", targetId: sessionId.slice("github:".length) };
-    if (sessionId.startsWith("todoist:"))
-        return { kind: "todoist", targetId: sessionId.slice("todoist:".length) };
-    if (sessionId.startsWith("notion:"))
-        return { kind: "notion", targetId: sessionId.slice("notion:".length) };
-    if (sessionId.startsWith("obsidian:"))
-        return { kind: "obsidian", targetId: sessionId.slice("obsidian:".length) };
-    return { kind: "console" };
-}
+export { deliveryForSession, originSessionId } from "./delivery.js";
 export function parseDurationMs(value) {
     const match = /^(\d+)(s|m|h|d)$/u.exec(value.trim());
     if (!match)

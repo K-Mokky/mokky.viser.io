@@ -43,6 +43,8 @@ test("dashboardCheck validates a live read-only dashboard contract without provi
     assert.match(result.report, /chat\.html serves a localhost-only token-protected WebChat page/);
     assert.match(result.report, /voice\.html serves a browser-side microphone transcript capture page without provider routes/);
     assert.match(result.report, /capture\.html serves a browser-side camera and screen capture page without provider routes/);
+    assert.match(result.report, /ssh -N -L 8787:127\.0\.0\.1:8787 -- /);
+    assert.match(result.report, /Open http:\/\/127\.0\.0\.1:8787\/ in a browser on this machine/);
     assert.equal(provider.prompts.length, 0);
   } finally {
     await rm(dir, { recursive: true, force: true });

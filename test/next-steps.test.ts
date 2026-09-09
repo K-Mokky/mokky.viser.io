@@ -23,6 +23,9 @@ test("nextStepsReport gives a launch checklist without running provider probes b
     assert.match(report, /Gateway strict live provider-proof dry-run: `viser gateway --dry-run --strict --live --probe-all-providers`/);
     assert.match(report, /Live provider-proof foreground gateway: `viser gateway`/);
     assert.match(report, /Always-on native service after live provider-proof gate: `viser service install`/);
+    assert.match(report, /loginctl enable-linger/);
+    assert.match(report, /ssh -N -L 8787:127\.0\.0\.1:8787 -- USER@HOST/);
+    assert.match(report, /6\. SSH \/ 24h CLI server/);
     assert.match(report, /Explicit live provider-proof foreground gateway: `viser gateway --strict --live --probe-all-providers`/);
     assert.match(report, /Unsafe raw foreground gateway for debugging only: `viser gateway --unsafe-skip-gate`/);
   } finally {

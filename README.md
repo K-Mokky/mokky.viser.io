@@ -166,6 +166,14 @@ grok
 cursor-agent
 ```
 
+SSH로 CLI 서버에 붙어서 로그인하면, provider CLI가 `http://127.0.0.1:<port>` 같은 주소를 줄 수 있어요. 그 주소는 **서버 자신**에서만 열리고, SSH를 건 본체 브라우저에서는 열리지 않아요. 본체에서 로컬 포트포워드를 연 다음 같은 URL을 여세요.
+
+```bash
+# 본체(노트북)에서 실행. <port>는 CLI가 인쇄한 로그인 포트.
+ssh -N -L <port>:127.0.0.1:<port> USER@HOST
+# 그다음 본체 브라우저에서 http://127.0.0.1:<port> 를 엽니다.
+```
+
 설치 여부는 다음으로 확인해요.
 
 ```bash
@@ -395,6 +403,9 @@ viser web-dashboard --port 8790
 viser dashboard-check --port 8790
 # foreground gateway와 함께 띄우고 싶을 때
 viser gateway --web-dashboard
+# SSH로 붙은 본체 브라우저에서 보려면 0.0.0.0 대신 로컬 포트포워드
+ssh -N -L 8787:127.0.0.1:8787 USER@HOST
+# 본체 브라우저: http://127.0.0.1:8787/  및  http://127.0.0.1:8787/chat.html
 # 명시적으로 원격 bind가 필요할 때: 강한 token + tunnel/reverse proxy를 같이 사용
 VISER_DASHBOARD_TOKEN="$(openssl rand -hex 32)" viser web-dashboard --host 0.0.0.0 --allow-remote
 ```
@@ -1090,7 +1101,7 @@ viser delete-job <id>
 
 `job-worker`는 foreground loop로 pending job을 계속 처리해요. 시작 시 이전 worker가 남긴 `running` job은 `pending`으로 되돌려 재처리 가능하게 해요. startup recovery나 tick 처리 중 storage/JSON 예외가 나도 오류를 기록하고 다음 tick에서 재시도해 gateway 전체 장애로 번지는 일을 줄여요. Foreground worker loop는 idle 상태의 `No pending jobs` tick 로그를 반복 출력하지 않고, 실제 job 실행/완료/실패와 오류만 기록해요. `jobs.concurrency`가 2 이상이면 한 tick에서 여러 pending job을 provider 호출 단계까지 병렬 처리하고, 상태 반영은 순차적으로 마무리해요. 이 loop도 live provider-proof `preflight`를 통과해야 시작하고, raw 디버그 실행은 `viser job-worker --unsafe-skip-gate` 또는 `npm run job-worker:raw`로 분리했어요. `gateway`를 실행하면 scheduler와 함께 job worker도 같이 실행돼요.
 
-Viser는 live provider-proof gate를 통과한 뒤 native always-on 서비스로 설치할 수 있어요. macOS launchd, Linux systemd --user, Windows Task Scheduler는 `viser service install`이 명시적으로 실행될 때만 등록돼요. 게이트가 막히면 native unit/plist/task는 복사되지 않아요. `service-run`은 같은 게이트를 다시 통과한 뒤에만 gateway를 시작하고, 실패하면 launchd restart loop를 피하려고 exit 0으로 끝나요.
+Viser는 live provider-proof gate를 통과한 뒤 native always-on 서비스로 설치할 수 있어요. macOS launchd, Linux systemd --user, Windows Task Scheduler는 `viser service install`이 명시적으로 실행될 때만 등록돼요. 게이트가 막히면 native unit/plist/task는 복사되지 않아요. `service-run`은 같은 게이트를 다시 통과한 뒤에만 gateway를 시작하고, 실패하면 launchd/systemd restart loop를 피하려고 exit 0으로 끝나요. Linux unit은 `Restart=always`와 `RestartPreventExitStatus=0`이라 crash/non-zero는 다시 올라오고, 막힌 preflight의 exit 0은 재시작하지 않아요.
 
 ```bash
 viser service check
@@ -1103,6 +1114,13 @@ viser service uninstall
 ```
 
 `gateway`는 scheduler, job worker, autonomy loop, credential이 있는 connector를 한 프로세스에서 함께 실행하는 control plane이에요. 터미널에서 `viser`를 바로 켜도 되고, 재부팅 후에도 유지하려면 `viser service install`을 쓰면 돼요.
+SSH CLI 서버에서 24시간 쓰려면 Linux systemd --user 설치 후 linger를 켜세요. Viser는 `loginctl enable-linger`를 대신 실행하지 않아요. 대시보드/WebChat은 계속 `127.0.0.1`에 두고, 본체 브라우저에서는 SSH 터널로 접속하세요. `0.0.0.0` bind는 `allowRemote`와 `VISER_DASHBOARD_TOKEN`이 있어도 WebChat을 원격에 열어 주지 않아요. Telegram/Discord 등 push-capable 메신저는 요청을 받으면 바로 ACK한 뒤 결과/오류를 같은 채팅으로 돌려요. `/enqueue`·`/team`·`/fix-loop`·`/supervise` 잡도 pairing된 그 채팅으로 start/done/failed/deferred를 보고해요. KakaoTalk Skill은 요청/응답만 있어서 예약·잡 follow-up을 푸시하지 않아요. ntfy/telegram이나 호스트 콘솔을 쓰세요.
+
+```bash
+loginctl enable-linger "$USER"
+# 본체:
+ssh -N -L 8787:127.0.0.1:8787 USER@HOST
+```
 
 
 ```bash
@@ -1327,7 +1345,7 @@ docs/build/                   파트별 제작 저널과 아키텍처 다이어�
 
 ## OpenClaw/Hermes 대비 남은 큰 차이
 
-- Viser는 live provider-proof gate를 통과한 뒤 `viser service install`로 macOS launchd / Linux systemd --user / Windows Task Scheduler 상시 실행을 켤 수 있어요. 게이트가 막히면 native service는 설치되지 않고, `service-run`은 launchd restart loop를 피하려고 exit 0으로 끝나요. Discord/Telegram 등 connector, scheduler, job worker, autonomy loop는 이 always-on 경로와 foreground `viser` 양쪽에서 돌아가요.
+- Viser는 live provider-proof gate를 통과한 뒤 `viser service install`로 macOS launchd / Linux systemd --user / Windows Task Scheduler 상시 실행을 켤 수 있어요. 게이트가 막히면 native service는 설치되지 않고, `service-run`은 launchd/systemd restart loop를 피하려고 exit 0으로 끝나요. Linux unit은 `Restart=always`와 `RestartPreventExitStatus=0`이라 crash만 재시작하고 막힌 preflight는 재시작하지 않아요. Discord/Telegram 등 connector, scheduler, job worker, autonomy loop는 이 always-on 경로와 foreground `viser` 양쪽에서 돌아가요.
 - Telegram/Discord에 더해 Slack Socket Mode/Web API, Matrix Client-Server, 로컬 `signal-cli` 기반 Signal connector, macOS Messages 기반 iMessage connector, WhatsApp Cloud API webhook/send connector, LINE Messaging API webhook/reply/push connector, KakaoTalk Open Builder Skill webhook/reply connector, token/HMAC-protected generic inbound Webhook(text와 bounded attachment metadata/text), Google Chat/Microsoft Teams/Mattermost/Synology Chat/Rocket.Chat/Feishu incoming webhook sender, generic HTTPS webhook sender, Home Assistant REST service-call sender, IRC/Twitch chat sender, ntfy push sender, Mastodon/Fediverse status sender, Webex/Zulip Messages API sender, local sendmail Email sender, GitHub issue/PR comment sender, Todoist task sender, Notion page append sender, Obsidian/local Markdown vault append sender까지 first-class로 구현했어요. 남은 channel breadth 격차는 platform-specific chat surface와 각 connector의 실제 계정 기반 live proof예요.
 - MCP 호환성은 local stdio tools/resources/prompts server와 `mcp-client-config` 기반 local client config export까지 확장했고, plugin ecosystem은 local `plugin.json` manifest registry와 명시적 `/plugin` 실행 경로를 제공해요. OpenClaw식 tool 격차도 줄이기 위해 private/heavy tree를 건너뛰는 guarded `search-files`, DuckDuckGo/SearXNG/Brave/Tavily/Perplexity/Exa/Firecrawl/Ollama provider를 지원하는 guarded `web-search`, JavaScript 없는 cached direct text/markdown 및 Firecrawl scrape-backed guarded `web-fetch`를 CLI `/tool`과 MCP `viser_search_files`/`viser_web_search`/`viser_web_fetch` 양쪽에 추가했고, Browser Use Cloud task creation, Browserbase cloud CDP session, Firecrawl Interact scrape-bound browser session, localhost CDP navigation/snapshot은 숨겨진 provider tool이 아니라 승인 기반 `browser-task` action으로 추가했지만, 원격 MCP marketplace나 provider-backed JS/browser search까지 포함한 완전한 생태계는 아직 아니에요.
 - Hermes식 self-improving loop는 `/autonomy`로 흡수했어요. 기본값은 `assistant.autonomy.interval=24h`, `assistant.autonomy.command=/curate-skills`이고, 런타임이 durable scheduler에 학습 루프를 올려 최근 세션에서 재사용 가능한 절차를 approval-gated `SKILL.md` draft로 staging해요. `/learn-skill`, `/reflect-skill`, `/curate-skills`는 그대로 수동/반자동 경로예요. 파일 쓰기는 계속 `/approve`가 필요하고, provider lane이 코드를 무승인으로 고치지는 않아요.

@@ -25,6 +25,7 @@ import { appendObsidianNoteMessage, parseObsidianNoteMap } from "../src/connecto
 import { ConnectorRateLimiter } from "../src/connectors/rate-limit.ts";
 import { normalizeRocketChatWebhookUrl, sendRocketChatMessage } from "../src/connectors/rocket-chat.ts";
 import { handleSignalEnvelope, normalizeSignalAddress, parseSignalEnvelopes, sendSignalMessage } from "../src/connectors/signal.ts";
+import { handleMatrixEvent } from "../src/connectors/matrix.ts";
 import { handleSlackEvent, normalizeSlackInput, sendSlackMessage } from "../src/connectors/slack.ts";
 import { normalizeSynologyChatWebhookUrl, sendSynologyChatMessage } from "../src/connectors/synology-chat.ts";
 import { normalizeTeamsWebhookUrl, sendTeamsMessage } from "../src/connectors/teams.ts";
@@ -37,7 +38,8 @@ import { handleWhatsappWebhookPayload, normalizeWhatsappRecipient, parseWhatsapp
 import { normalizeZaloAccessToken, normalizeZaloUserId, parseZaloRecipientMap, sendZaloMessage } from "../src/connectors/zalo.ts";
 import { normalizeZulipSiteUrl, parseZulipTargetSpec, sendZulipMessage } from "../src/connectors/zulip.ts";
 import { chunkText } from "../src/utils/text.ts";
-import type { AssistantHandleOptions, DingTalkConnectorConfig, DiscordConnectorConfig, EmailConnectorConfig, FeishuConnectorConfig, GenericWebhookConnectorConfig, GitHubConnectorConfig, GoogleChatConnectorConfig, HomeAssistantConnectorConfig, ImessageConnectorConfig, IrcConnectorConfig, KakaotalkConnectorConfig, LineConnectorConfig, MastodonConnectorConfig, MattermostConnectorConfig, NextcloudTalkConnectorConfig, NotionConnectorConfig, NtfyConnectorConfig, ObsidianConnectorConfig, RocketChatConnectorConfig, SignalConnectorConfig, SlackConnectorConfig, SynologyChatConnectorConfig, TeamsConnectorConfig, TelegramConnectorConfig, TodoistConnectorConfig, TwitchConnectorConfig, WeComConnectorConfig, WebexConnectorConfig, WhatsappConnectorConfig, ZaloConnectorConfig, ZulipConnectorConfig } from "../src/core/types.ts";
+import { INBOUND_WORK_ACK } from "../src/connectors/progress.ts";
+import type { AssistantHandleOptions, DingTalkConnectorConfig, DiscordConnectorConfig, EmailConnectorConfig, FeishuConnectorConfig, GenericWebhookConnectorConfig, GitHubConnectorConfig, GoogleChatConnectorConfig, HomeAssistantConnectorConfig, ImessageConnectorConfig, IrcConnectorConfig, KakaotalkConnectorConfig, LineConnectorConfig, MastodonConnectorConfig, MatrixConnectorConfig, MattermostConnectorConfig, NextcloudTalkConnectorConfig, NotionConnectorConfig, NtfyConnectorConfig, ObsidianConnectorConfig, RocketChatConnectorConfig, SignalConnectorConfig, SlackConnectorConfig, SynologyChatConnectorConfig, TeamsConnectorConfig, TelegramConnectorConfig, TodoistConnectorConfig, TwitchConnectorConfig, WeComConnectorConfig, WebexConnectorConfig, WhatsappConnectorConfig, ZaloConnectorConfig, ZulipConnectorConfig } from "../src/core/types.ts";
 
 test("Discord input accepts DMs without prefix", () => {
   assert.equal(normalizeDiscordInput("hello", "!viser", "123", false), "hello");
@@ -431,7 +433,7 @@ test("pollTelegramUpdates advances offsets even when one update delivery fails",
     const nextOffset = await pollTelegramUpdates("token", telegramConfig(), fakeAssistant(), 0);
     assert.equal(nextOffset, 42);
     assert.equal(calls.filter((url) => url.includes("/getUpdates")).length, 1);
-    assert.equal(calls.filter((url) => url.includes("/sendMessage")).length, 2);
+    assert.equal(calls.filter((url) => url.includes("/sendMessage")).length, 3);
     assert.match(logged.join("\n"), /Telegram update 41 failed/);
   } finally {
     globalThis.fetch = originalFetch;
@@ -495,6 +497,7 @@ test("pollTelegramUpdates applies per-chat rate limits before invoking the assis
     assert.equal(nextOffset, 43);
     assert.equal(assistantCalls, 1);
     assert.deepEqual(sentTexts, [
+      INBOUND_WORK_ACK,
       "answer",
       "Viser rate limit: too many messages from this chat/channel. Try again in 60s."
     ]);
@@ -603,7 +606,7 @@ test("pollTelegramUpdates honors default chats when an allowlist also exists wit
 
     assert.equal(nextOffset, 62);
     assert.equal(assistantCalls, 1);
-    assert.deepEqual(sentTexts, ["answer"]);
+    assert.deepEqual(sentTexts, [INBOUND_WORK_ACK, "answer"]);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -654,6 +657,7 @@ test("handleDiscordMessage applies per-channel rate limits before invoking the a
 
     assert.equal(assistantCalls, 1);
     assert.deepEqual(sentTexts, [
+      INBOUND_WORK_ACK,
       "answer",
       "Viser rate limit: too many messages from this chat/channel. Try again in 60s."
     ]);
@@ -726,7 +730,7 @@ test("handleDiscordMessage honors default channels when an allowlist also exists
     }, "bot-1", access as any);
 
     assert.equal(assistantCalls, 1);
-    assert.deepEqual(sentTexts, ["answer"]);
+    assert.deepEqual(sentTexts, [INBOUND_WORK_ACK, "answer"]);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -796,6 +800,7 @@ test("handleSlackEvent applies per-channel rate limits before invoking the assis
 
     assert.equal(assistantCalls, 1);
     assert.deepEqual(sentTexts, [
+      INBOUND_WORK_ACK,
       "answer",
       "Viser rate limit: too many messages from this chat/channel. Try again in 60s."
     ]);
@@ -893,7 +898,53 @@ test("handleSignalEnvelope routes allowed messages through the assistant and sig
   );
 
   assert.equal(assistantCalls, 1);
-  assert.deepEqual(sentTexts, ["answer"]);
+  assert.deepEqual(sentTexts, [INBOUND_WORK_ACK, "answer"]);
+});
+test("handleMatrixEvent ACKs allowed rooms then delivers the assistant reply", async () => {
+  const originalFetch = globalThis.fetch;
+  const sentTexts: string[] = [];
+  let assistantCalls = 0;
+  const config: MatrixConnectorConfig = {
+    enabled: true,
+    homeserverUrlEnv: "MATRIX_HOMESERVER_URL",
+    homeserverUrl: "https://matrix.example.org",
+    accessTokenEnv: "MATRIX_ACCESS_TOKEN",
+    accessToken: "matrix-secret-token",
+    userIdEnv: "MATRIX_USER_ID",
+    userId: "@bot:example.org",
+    prefix: "!viser",
+    allowedRoomIds: ["!room:example.org"],
+    defaultRoomIds: [],
+    maxMessagesPerMinute: 20,
+    maxInputChars: 4000,
+    pollTimeoutMs: 30_000
+  };
+
+  globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+    sentTexts.push(String(JSON.parse(String(init?.body)).body));
+    return new Response(JSON.stringify({ event_id: "$ok" }), { status: 200, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+
+  try {
+    await handleMatrixEvent("matrix-secret-token", config, {
+      async handle(input: string, sessionId: string, options?: AssistantHandleOptions): Promise<string> {
+        assistantCalls += 1;
+        assert.equal(input, "hello");
+        assert.equal(sessionId, "matrix:!room:example.org");
+        assert.equal(options?.source, "matrix");
+        return "answer";
+      }
+    } as any, "!room:example.org", {
+      type: "m.room.message",
+      sender: "@user:example.org",
+      content: { msgtype: "m.text", body: "!viser hello" }
+    });
+
+    assert.equal(assistantCalls, 1);
+    assert.deepEqual(sentTexts, [INBOUND_WORK_ACK, "answer"]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("sendSignalMessage redacts account, recipient, and body from signal-cli errors", async () => {
@@ -937,7 +988,7 @@ test("handleImessageMessage routes allowed handles through the assistant and loc
   );
 
   assert.equal(assistantCalls, 1);
-  assert.deepEqual(sentTexts, ["answer"]);
+  assert.deepEqual(sentTexts, [INBOUND_WORK_ACK, "answer"]);
 });
 
 test("sendImessageMessage redacts recipient, body, and chat database path from osascript errors", async () => {
@@ -1003,7 +1054,7 @@ test("handleWhatsappWebhookPayload routes allowed messages through assistant and
 
   assert.equal(count, 1);
   assert.equal(assistantCalls, 1);
-  assert.deepEqual(sentTexts, ["answer"]);
+  assert.deepEqual(sentTexts, [INBOUND_WORK_ACK, "answer"]);
 });
 
 test("handleLineWebhookPayload routes allowed messages through assistant and Messaging API reply", async () => {
@@ -1047,7 +1098,7 @@ test("handleLineWebhookPayload routes allowed messages through assistant and Mes
 
   assert.equal(count, 1);
   assert.equal(assistantCalls, 1);
-  assert.deepEqual(sentTexts, ["answer"]);
+  assert.deepEqual(sentTexts, [INBOUND_WORK_ACK, "answer"]);
 });
 
 test("handleKakaotalkSkillPayload routes allowed Open Builder skill calls through assistant", async () => {

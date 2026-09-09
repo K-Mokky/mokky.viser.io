@@ -35,6 +35,111 @@ test("JobStore enqueues, lists, starts, and finishes jobs", async () => {
     await rm(dir, { recursive: true, force: true });
   }
 });
+test("JobStore records messenger delivery from the originating session", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-jobs-delivery-"));
+  try {
+    const store = new JobStore(dir);
+    const job = await store.enqueue({ prompt: "brief me", sessionId: "telegram:42:team:abc:planner", source: "telegram" });
+    assert.deepEqual(job.delivery, { kind: "telegram", targetId: "42" });
+    const cli = await store.enqueue({ prompt: "local", sessionId: "cli:/tmp", source: "cli" });
+    assert.equal(cli.delivery, undefined);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test("runQueuedJobs notifies start and done for messenger jobs", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-jobs-notify-"));
+  try {
+    const store = new JobStore(dir);
+    const processor = new FakeProcessor("ok");
+    const events: Array<{ status: string; id: string }> = [];
+    const job = await store.enqueue({ prompt: "queued", sessionId: "discord:99", source: "discord" });
+
+    const report = await runQueuedJobs(store, processor, 1, {
+      notifier: async (item, status) => {
+        events.push({ status, id: item.id });
+      }
+    });
+
+    assert.equal(report.ran, 1);
+    assert.deepEqual(events, [
+      { status: "started", id: job.id },
+      { status: "done", id: job.id }
+    ]);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+test("runQueuedJobs notifies failed and deferred messenger jobs", async () => {
+  const failDir = await mkdtemp(join(tmpdir(), "viser-jobs-notify-fail-"));
+  try {
+    const store = new JobStore(failDir);
+    const events: string[] = [];
+    await store.enqueue({ prompt: "boom", sessionId: "telegram:42", source: "telegram" });
+    const report = await runQueuedJobs(store, {
+      async handle(): Promise<string> {
+        throw new Error("provider exploded");
+      }
+    }, 1, {
+      notifier: async (_job, status) => {
+        events.push(status);
+      }
+    });
+    assert.equal(report.ran, 1);
+    assert.deepEqual(events, ["started", "failed"]);
+    assert.equal((await store.list("failed")).length, 1);
+  } finally {
+    await rm(failDir, { recursive: true, force: true });
+  }
+
+  const deferDir = await mkdtemp(join(tmpdir(), "viser-jobs-notify-defer-"));
+  try {
+    const store = new JobStore(deferDir);
+    const events: string[] = [];
+    await store.enqueue({ prompt: "later", sessionId: "discord:99", source: "discord" });
+    const report = await runQueuedJobs(
+      store,
+      new FakeProcessor("All provider attempts failed.\n- codex: Operation not permitted", { raw: true }),
+      1,
+      {
+        notifier: async (_job, status) => {
+          events.push(status);
+        }
+      }
+    );
+    assert.equal(report.ran, 1);
+    assert.deepEqual(events, ["started", "deferred"]);
+    assert.equal((await store.list("pending")).length, 1);
+  } finally {
+    await rm(deferDir, { recursive: true, force: true });
+  }
+});
+
+test("runQueuedJobs keeps job completion when progress notify throws", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-jobs-notify-throw-"));
+  const originalError = console.error;
+  const logged: string[] = [];
+  console.error = (message?: unknown) => {
+    logged.push(String(message));
+  };
+  try {
+    const store = new JobStore(dir);
+    const processor = new FakeProcessor("ok");
+    await store.enqueue({ prompt: "queued", sessionId: "telegram:42", source: "telegram" });
+    const report = await runQueuedJobs(store, processor, 1, {
+      notifier: async () => {
+        throw new Error("notify boom");
+      }
+    });
+    assert.equal(report.ran, 1);
+    assert.equal((await store.list("done")).length, 1);
+    assert.match(logged.join("\n"), /notify failed/);
+  } finally {
+    console.error = originalError;
+    await rm(dir, { recursive: true, force: true });
+  }
+});
 
 test("JobStore can cancel pending jobs", async () => {
   const dir = await mkdtemp(join(tmpdir(), "viser-jobs-cancel-"));

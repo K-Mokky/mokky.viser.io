@@ -142,6 +142,8 @@ export function doctorReport(config: ViserConfig, envLoad?: EnvLoadResult): stri
   rows.push("- environment/token loading: `viser env-check`");
   rows.push("- no-start launch rehearsal: `viser gateway --dry-run --strict --live --probe-all-providers`");
   rows.push("- actionable recovery checklist: `viser next-steps --live --probe-all-providers`");
+  rows.push("- 24h CLI server: `viser service install` (Linux linger: `loginctl enable-linger \"$USER\"`)");
+  rows.push("- SSH laptop browser: keep dashboard on 127.0.0.1 and use `ssh -N -L <port>:127.0.0.1:<port> -- USER@HOST`");
 
   return rows.join("\n");
 }

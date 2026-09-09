@@ -118,7 +118,8 @@ test("generateSystemdUserService points systemd at the restart-safe service runn
     assert.match(unit, /^\[Service\]/m);
     assert.match(unit, /^\[Install\]/m);
     assert.match(unit, /ExecStart="\/usr\/bin\/node" "\/tmp\/viser-systemd\/src\/index\.ts" "service-run" "--live" "--probe-all-providers"/);
-    assert.match(unit, /Restart=on-failure/);
+    assert.match(unit, /Restart=always/);
+    assert.match(unit, /RestartPreventExitStatus=0/);
     assert.match(unit, /Environment="VISER_CONFIG=\/tmp\/viser-systemd\/viser\.config\.json"/);
     assert.match(unit, /Environment="VISER_ENV=\/tmp\/viser-systemd\/prod\.env"/);
     assert.match(unit, /StandardOutput=append:\/tmp\/viser-systemd\/\.viser\/logs\/gateway\.out\.log/);
@@ -144,6 +145,7 @@ test("writeWorkspaceSystemdService writes the user service unit under storage", 
     assert.match(report, /systemctl --user daemon-reload/);
     assert.match(report, /systemctl --user enable --now com\.mokky\.viser\.service/);
     assert.match(report, /loginctl enable-linger/);
+    assert.match(report, /ssh -N -L/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
@@ -193,6 +195,8 @@ test("installService installs Linux systemd user units after the live gate passe
     ]);
     assert.match(report, /service systemd install: ok/);
     assert.match(report, /Installed .*com\.mokky\.viser\.service/);
+    assert.match(report, /loginctl enable-linger/);
+    assert.match(report, /ssh -N -L/);
   } finally {
     if (originalHome === undefined) delete process.env.HOME;
     else process.env.HOME = originalHome;

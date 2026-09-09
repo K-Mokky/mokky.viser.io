@@ -10,6 +10,7 @@ import { DEFAULT_FETCH_TIMEOUT_MS, fetchWithTimeout } from "../utils/fetch.js";
 import { pairedMessage, pairingRequiredMessage } from "./telegram.js";
 import { connectorInputLimitMessage, connectorInputTooLong } from "./input-policy.js";
 import { ConnectorRateLimiter, connectorRateLimitMessage } from "./rate-limit.js";
+import { runInboundAssistantTurn } from "./progress.js";
 const MATRIX_RETRY_DELAY_MS = 5000;
 const MATRIX_LONG_POLL_MARGIN_MS = 5000;
 export async function runMatrixBridge(config, assistant, access) {
@@ -86,14 +87,8 @@ export async function handleMatrixEvent(token, config, assistant, roomId, event,
         await sendMatrixMessage(token, config, roomId, connectorRateLimitMessage(rate.retryAfterMs));
         return;
     }
-    try {
-        const answer = await assistant.handle(normalized, `matrix:${roomId}`, { source: "matrix" });
-        await sendMatrixMessage(token, config, roomId, answer);
-    }
-    catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
-        await sendMatrixMessage(token, config, roomId, `Viser error:\n${detail}`);
-    }
+    const text = normalized;
+    await runInboundAssistantTurn((chunk) => sendMatrixMessage(token, config, roomId, chunk), () => assistant.handle(text, `matrix:${roomId}`, { source: "matrix" }));
 }
 export function normalizeMatrixInput(content, prefix, botUserId) {
     const trimmed = content.trim();

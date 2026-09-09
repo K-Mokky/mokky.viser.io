@@ -10,6 +10,7 @@ import { DEFAULT_FETCH_TIMEOUT_MS, fetchWithTimeout, type FetchLike } from "../u
 import { pairedMessage, pairingRequiredMessage } from "./telegram.ts";
 import { connectorInputLimitMessage, connectorInputTooLong } from "./input-policy.ts";
 import { ConnectorRateLimiter, connectorRateLimitMessage } from "./rate-limit.ts";
+import { runInboundAssistantTurn } from "./progress.ts";
 import type { AssistantRuntime } from "../core/assistant.ts";
 import type { DiscordConnectorConfig } from "../core/types.ts";
 
@@ -176,13 +177,11 @@ export async function handleDiscordMessage(
     return;
   }
 
-  try {
-    const answer = await assistant.handle(normalized, `discord:${message.channel_id}`, { source: "discord" });
-    await sendDiscordMessage(token, message.channel_id, answer);
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    await sendDiscordMessage(token, message.channel_id, `Viser error:\n${detail}`);
-  }
+  const text = normalized;
+  await runInboundAssistantTurn(
+    (chunk) => sendDiscordMessage(token, message.channel_id, chunk),
+    () => assistant.handle(text, `discord:${message.channel_id}`, { source: "discord" })
+  );
 }
 
 export function normalizeDiscordInput(content: string, prefix: string, botUserId: string | undefined, isGuild: boolean): string | undefined {

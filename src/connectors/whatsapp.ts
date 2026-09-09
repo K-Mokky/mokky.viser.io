@@ -13,6 +13,7 @@ import { chunkText } from "../utils/text.ts";
 import { pairedMessage, pairingRequiredMessage } from "./telegram.ts";
 import { connectorInputLimitMessage, connectorInputTooLong } from "./input-policy.ts";
 import { ConnectorRateLimiter, connectorRateLimitMessage } from "./rate-limit.ts";
+import { runInboundAssistantTurn } from "./progress.ts";
 import type { AssistantRuntime } from "../core/assistant.ts";
 import type { WhatsappConnectorConfig } from "../core/types.ts";
 
@@ -200,13 +201,11 @@ export async function handleWhatsappMessage(
     return;
   }
 
-  try {
-    const answer = await assistant.handle(normalized, `whatsapp:${from}`, { source: "whatsapp" });
-    await sendWhatsappMessage(config, from, answer, options);
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    await sendWhatsappMessage(config, from, `Viser error:\n${detail}`, options);
-  }
+  const text = normalized;
+  await runInboundAssistantTurn(
+    (chunk) => sendWhatsappMessage(config, from, chunk, options),
+    () => assistant.handle(text, `whatsapp:${from}`, { source: "whatsapp" })
+  );
 }
 
 export async function sendWhatsappMessage(

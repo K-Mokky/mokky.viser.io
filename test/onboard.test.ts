@@ -28,6 +28,9 @@ test("onboard prepares first-run files and prints a beginner 3-step guide", asyn
     assert.match(stdout, /codex login/);
     assert.match(stdout, /cursor-agent/);
     assert.match(stdout, /SECURITY\.md/);
+    assert.match(stdout, /ssh -N -L/);
+    assert.match(stdout, /viser service install/);
+    assert.match(stdout, /loginctl enable-linger/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

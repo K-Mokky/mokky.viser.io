@@ -9,6 +9,7 @@ import { randomUUID } from "node:crypto";
 import { appendPrivateFile, ensurePrivateDir, readPrivateFileIfExists, writePrivateFile } from "../utils/files.js";
 import { nowIso } from "../utils/text.js";
 import { isProviderFailureOutput } from "./provider-output.js";
+import { deliveryForSession } from "./delivery.js";
 const PROVIDER_FAILURE_BASE_BACKOFF_MS = 60_000;
 const PROVIDER_FAILURE_MAX_BACKOFF_MS = 60 * 60_000;
 export const MAX_JOB_CONCURRENCY = 6;
@@ -23,6 +24,7 @@ export class JobStore {
             throw new Error("Job prompt is required.");
         const dependsOn = normalizeJobDependencies(input.dependsOn);
         const jobs = await this.list();
+        const delivery = input.delivery ?? deliveryForSession(input.sessionId);
         const job = {
             id: randomUUID().slice(0, 12),
             prompt,
@@ -30,6 +32,7 @@ export class JobStore {
             source: input.source,
             providerId: input.providerId,
             ...(dependsOn.length ? { dependsOn } : {}),
+            ...(delivery.kind === "console" ? {} : { delivery }),
             status: "pending",
             attempts: 0,
             createdAt: nowIso()
@@ -287,6 +290,7 @@ export async function runQueuedJobs(store, processor, limit = 1, options = {}) {
             if (!job)
                 continue;
             started.push(job);
+            await notifyJobProgress(options.notifier, job, "started");
         }
         if (started.length === 0)
             break;
@@ -311,14 +315,17 @@ export async function runQueuedJobs(store, processor, limit = 1, options = {}) {
             if (outcome.status === "deferred") {
                 await store.defer(outcome.job.id, outcome.output);
                 lines.push(`- [${outcome.job.id}] deferred: provider unavailable`);
+                await notifyJobProgress(options.notifier, outcome.job, "deferred", outcome.output);
             }
             else if (outcome.status === "done") {
                 await store.finish(outcome.job.id, outcome.output);
                 lines.push(`- [${outcome.job.id}] done`);
+                await notifyJobProgress(options.notifier, outcome.job, "done", outcome.output);
             }
             else {
                 await store.fail(outcome.job.id, outcome.output);
                 lines.push(`- [${outcome.job.id}] failed: ${outcome.output}`);
+                await notifyJobProgress(options.notifier, outcome.job, "failed", outcome.output);
             }
         }
     }
@@ -436,4 +443,14 @@ async function mapWithConcurrency(items, concurrency, mapper) {
         }
     }));
     return results;
+}
+async function notifyJobProgress(notifier, job, status, output) {
+    if (!notifier)
+        return;
+    try {
+        await notifier(job, status, output);
+    }
+    catch (error) {
+        console.error(`Job [${job.id}] ${status} notify failed: ${errorMessage(error)}`);
+    }
 }

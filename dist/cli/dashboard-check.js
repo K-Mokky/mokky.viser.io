@@ -7,6 +7,7 @@
 // without touching providers, jobs, or write/action routes.
 import { DASHBOARD_SCHEMA_VERSION } from "../connectors/web-dashboard.js";
 import { fetchWithTimeout } from "../utils/fetch.js";
+import { remoteLoopbackAccessLines, portFromLoopbackTarget } from "../utils/remote-access.js";
 const DEFAULT_DASHBOARD_CHECK_TIMEOUT_MS = 3_000;
 const LOCAL_DASHBOARD_HOSTS = new Set(["127.0.0.1", "localhost", "::1"]);
 export async function dashboardCheck(config, options = {}) {
@@ -317,9 +318,12 @@ function formatDashboardCheckReport(target, timeoutMs, items) {
         warnings.length ? warnings.map((item) => `- [${item.area}] ${item.message}${item.next ? ` — ${item.next}` : ""}`).join("\n") : "- none",
         "",
         "Next:",
-        ok
-            ? `- Open ${target}/ in a browser, or run \`viser launch-status\` for live provider proof.`
-            : "- Fix the blocker above, then rerun `viser dashboard-check --strict`."
+        ...(ok
+            ? [
+                `- Open ${target}/ in a browser on this machine, or run \`viser launch-status\` for live provider proof.`,
+                ...remoteLoopbackAccessLines({ always: true, port: portFromLoopbackTarget(target) }).map((line) => `- ${line}`)
+            ]
+            : ["- Fix the blocker above, then rerun `viser dashboard-check --strict`."])
     ].join("\n");
 }
 function formatItem(item) {

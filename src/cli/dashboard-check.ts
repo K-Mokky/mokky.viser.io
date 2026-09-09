@@ -8,6 +8,7 @@
 
 import { DASHBOARD_SCHEMA_VERSION } from "../connectors/web-dashboard.ts";
 import { fetchWithTimeout, type FetchLike } from "../utils/fetch.ts";
+import { remoteLoopbackAccessLines, portFromLoopbackTarget } from "../utils/remote-access.ts";
 import type { ViserConfig } from "../core/types.ts";
 
 const DEFAULT_DASHBOARD_CHECK_TIMEOUT_MS = 3_000;
@@ -370,9 +371,12 @@ function formatDashboardCheckReport(target: string, timeoutMs: number, items: Da
     warnings.length ? warnings.map((item) => `- [${item.area}] ${item.message}${item.next ? ` — ${item.next}` : ""}`).join("\n") : "- none",
     "",
     "Next:",
-    ok
-      ? `- Open ${target}/ in a browser, or run \`viser launch-status\` for live provider proof.`
-      : "- Fix the blocker above, then rerun `viser dashboard-check --strict`."
+    ...(ok
+      ? [
+          `- Open ${target}/ in a browser on this machine, or run \`viser launch-status\` for live provider proof.`,
+          ...remoteLoopbackAccessLines({ always: true, port: portFromLoopbackTarget(target) }).map((line) => `- ${line}`)
+        ]
+      : ["- Fix the blocker above, then rerun `viser dashboard-check --strict`."])
   ].join("\n");
 }
 

@@ -44,6 +44,14 @@ test("parseScheduleInput derives delivery from session", () => {
 test("deliveryForSession falls back to console", () => {
   assert.deepEqual(deliveryForSession("cli:/tmp"), { kind: "console" });
 });
+test("deliveryForSession maps KakaoTalk sessions without inventing a push API", () => {
+  assert.deepEqual(deliveryForSession("kakaotalk:bot-user-key-123"), { kind: "kakaotalk", targetId: "bot-user-key-123" });
+});
+
+test("deliveryForSession keeps team/fix-loop/supervisor jobs on the originating chat", () => {
+  assert.deepEqual(deliveryForSession("telegram:42:team:abc:planner"), { kind: "telegram", targetId: "42" });
+  assert.deepEqual(deliveryForSession("discord:99:fix-loop:abc:implementer"), { kind: "discord", targetId: "99" });
+});
 
 test("ScheduleStore stores and removes tasks", async () => {
   const dir = await mkdtemp(join(tmpdir(), "viser-schedules-"));

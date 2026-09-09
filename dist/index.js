@@ -45,13 +45,14 @@ import { runMatrixBridge } from "./connectors/matrix.js";
 import { runSignalBridge } from "./connectors/signal.js";
 import { runSlackBridge } from "./connectors/slack.js";
 import { runGateway } from "./connectors/gateway.js";
-import { createConnectorNotifier } from "./connectors/notifier.js";
+import { createConnectorNotifier, createJobProgressNotifier } from "./connectors/notifier.js";
 import { DEFAULT_WEB_DASHBOARD_HOST, DEFAULT_WEB_DASHBOARD_PORT, startWebDashboard } from "./connectors/web-dashboard.js";
 import { runMcpStdioServer } from "./connectors/mcp-server.js";
 import { AccessStore, parseConnector } from "./core/access.js";
 import { JobRunner, JobStore } from "./core/jobs.js";
 import { SchedulerRunner } from "./core/scheduler.js";
 import { loadEnvFile } from "./utils/env.js";
+import { formatDashboardListenerNotice } from "./utils/remote-access.js";
 import { fileExists } from "./utils/files.js";
 async function main() {
     const rawArgv = process.argv.slice(2);
@@ -434,7 +435,7 @@ async function main() {
                     return;
                 if (jobsConfig.enabled && !await foregroundGate("job-worker", config, parsed.flags))
                     return;
-                await new JobRunner(jobsConfig, assistant, { maxInputChars: config.assistant.maxInputChars }).loop();
+                await new JobRunner(jobsConfig, assistant, { maxInputChars: config.assistant.maxInputChars, notifier: createJobProgressNotifier(config) }).loop();
             }
             return;
         case "cancel-job":
@@ -785,7 +786,7 @@ async function runWebDashboardCommand(config, sessionId, flags) {
         canvasDir: effectiveConfig.webDashboard.canvasDir,
         authToken: effectiveConfig.webDashboard.authToken
     });
-    console.log(`Viser web dashboard: ${handle.url}`);
+    console.log(formatDashboardListenerNotice(handle.url, effectiveConfig.webDashboard.port));
     console.log("mode: read-only localhost dashboard (no provider calls, no write/action routes)");
     console.log("JSON: /dashboard.json");
     console.log("Press Ctrl+C to stop.");

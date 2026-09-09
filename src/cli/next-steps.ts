@@ -9,6 +9,7 @@ import { auditItems, summarizeAudit } from "./audit.ts";
 import { readinessItems, summarizeReadiness, type ReadinessOptions } from "./readiness.ts";
 import { providerIssueAdvice, providerSmokeCommand } from "../providers/guide.ts";
 import { commandExists } from "../utils/exec.ts";
+import { formatRemoteOperatorGuidance, loopbackOpenUrl, sshLocalForwardCommand } from "../utils/remote-access.ts";
 import type { AuditItem } from "./audit.ts";
 import type { ReadinessItem } from "./readiness.ts";
 import type { CliProviderConfig, ViserConfig } from "../core/types.ts";
@@ -56,7 +57,12 @@ export async function nextStepsReport(config: ViserConfig, options: NextStepsOpt
     "   - Live provider-proof foreground gateway: `viser gateway`",
     "   - Explicit live provider-proof foreground gateway: `viser gateway --strict --live --probe-all-providers`",
     "   - Unsafe raw foreground gateway for debugging only: `viser gateway --unsafe-skip-gate`",
-    "   - Always-on native service after live provider-proof gate: `viser service install`"
+    "   - Always-on native service after live provider-proof gate: `viser service install`",
+    "   - Linux linger so the systemd --user unit survives SSH logout: `loginctl enable-linger \"$USER\"`",
+    `   - SSH laptop browser: \`${sshLocalForwardCommand(config.webDashboard.port, "USER@HOST")}\` then open ${loopbackOpenUrl(config.webDashboard.port, "/")}`,
+    "",
+    "6. SSH / 24h CLI server",
+    ...formatRemoteOperatorGuidance({ always: true, port: config.webDashboard.port }).split("\n").map((line) => `   ${line}`)
   ].join("\n");
 }
 

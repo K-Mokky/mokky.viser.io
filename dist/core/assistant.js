@@ -11,7 +11,7 @@ import { providerGuideReport, providerIssueAdvice } from "../providers/guide.js"
 import { commandExists } from "../utils/exec.js";
 import { appendPrivateFile, readPrivateFileIfExists } from "../utils/files.js";
 import { formatDuration, nowIso } from "../utils/text.js";
-import { createConnectorMessageSender } from "../connectors/notifier.js";
+import { createConnectorMessageSender, createJobProgressNotifier } from "../connectors/notifier.js";
 import { ActionStore } from "./actions.js";
 import { SessionStore } from "./history.js";
 import { JobStore, parseJobStatus, runQueuedJobs } from "./jobs.js";
@@ -1236,7 +1236,8 @@ export class AssistantRuntime {
         const limit = parsed.limit ?? parsed.concurrency ?? 1;
         return (await runQueuedJobs(this.jobStore, this, limit, {
             concurrency: parsed.concurrency,
-            maxInputChars: this.config.assistant.maxInputChars
+            maxInputChars: this.config.assistant.maxInputChars,
+            notifier: createJobProgressNotifier(this.config)
         })).lines.join("\n");
     }
     async cancelJob(id) {

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { createConnectorMessageSender } from "../src/connectors/notifier.ts";
+import { createConnectorMessageSender, createJobProgressNotifier } from "../src/connectors/notifier.ts";
 import { pairingRequiredMessage, pairedMessage } from "../src/connectors/telegram.ts";
 import { DEFAULT_CONFIG } from "../src/config.ts";
 import type { ViserConfig } from "../src/core/types.ts";
@@ -50,6 +50,35 @@ test("connector message sender refuses unpaired outbound targets before token us
       /not allowed/
     );
   } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+test("job progress notifier does not send to unpaired messenger peers", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "viser-job-notify-deny-"));
+  const originalFetch = globalThis.fetch;
+  let fetches = 0;
+  globalThis.fetch = (async () => {
+    fetches += 1;
+    return new Response("", { status: 200 });
+  }) as typeof fetch;
+  try {
+    const config = testConfig(dir);
+    config.connectors.telegram.botToken = "123456:telegram-secret-token";
+    const notify = createJobProgressNotifier(config);
+    await notify({
+      id: "job1",
+      prompt: "secret work",
+      sessionId: "telegram:123456",
+      source: "telegram",
+      status: "done",
+      attempts: 1,
+      createdAt: new Date().toISOString(),
+      delivery: { kind: "telegram", targetId: "123456" },
+      result: "done text"
+    }, "done", "done text");
+    assert.equal(fetches, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
     await rm(dir, { recursive: true, force: true });
   }
 });

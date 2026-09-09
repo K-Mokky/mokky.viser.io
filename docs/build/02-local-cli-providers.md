@@ -75,3 +75,7 @@ cursor-agent
 
 Viser never collects those account passwords. The operator logs in with the
 official CLI once, then Viser reuses that local session.
+If that official CLI prints `http://127.0.0.1:<port>`, an SSH operator must
+forward the port from their laptop (`ssh -N -L <port>:127.0.0.1:<port>
+USER@HOST`) and open the URL there. The server loopback is not the laptop
+browser.

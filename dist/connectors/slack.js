@@ -9,6 +9,7 @@ import { DEFAULT_FETCH_TIMEOUT_MS, fetchWithTimeout } from "../utils/fetch.js";
 import { pairedMessage, pairingRequiredMessage } from "./telegram.js";
 import { connectorInputLimitMessage, connectorInputTooLong } from "./input-policy.js";
 import { ConnectorRateLimiter, connectorRateLimitMessage } from "./rate-limit.js";
+import { runInboundAssistantTurn } from "./progress.js";
 const SLACK_API_BASE = "https://slack.com/api";
 const SLACK_RECONNECT_DELAY_MS = 5000;
 export async function runSlackBridge(config, assistant, access) {
@@ -106,14 +107,9 @@ export async function handleSlackEvent(token, config, assistant, event, access, 
         await sendSlackMessage(token, event.channel, connectorRateLimitMessage(rate.retryAfterMs));
         return;
     }
-    try {
-        const answer = await assistant.handle(normalized, `slack:${event.channel}`, { source: "slack" });
-        await sendSlackMessage(token, event.channel, answer);
-    }
-    catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
-        await sendSlackMessage(token, event.channel, `Viser error:\n${detail}`);
-    }
+    const channel = event.channel;
+    const text = normalized;
+    await runInboundAssistantTurn((chunk) => sendSlackMessage(token, channel, chunk), () => assistant.handle(text, `slack:${channel}`, { source: "slack" }));
 }
 export function normalizeSlackInput(content, prefix, botUserId, isDirectMessage) {
     const trimmed = content.trim();

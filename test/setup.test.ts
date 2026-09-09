@@ -35,6 +35,9 @@ test("setup creates first-run files and prints safe provider-proof launch guidan
     assert.match(stdout, /viser service uninstall/);
     assert.match(stdout, /VISER_ENV/);
     assert.match(stdout, /grok login/);
+    assert.match(stdout, /SSH \/ 24h CLI server/);
+    assert.match(stdout, /ssh -N -L/);
+    assert.match(stdout, /viser service install/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

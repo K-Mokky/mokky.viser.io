@@ -8,6 +8,7 @@
 
 import { probeCliProvider, type ProviderProbeResult } from "./health.ts";
 import { commandExists } from "../utils/exec.ts";
+import { formatRemoteOperatorGuidance } from "../utils/remote-access.ts";
 import type { CliProviderConfig, ViserConfig } from "../core/types.ts";
 
 export interface ProviderGuideOptions {
@@ -32,6 +33,8 @@ export async function providerGuideReport(
   return [
     "Viser provider login guide",
     "Model access rule: Viser uses already logged-in local CLIs, not LLM HTTP API keys.",
+    "",
+    ...formatRemoteOperatorGuidance({ always: true, port: config.webDashboard.port }).split("\n"),
     "",
     ...blocks
   ].join("\n");

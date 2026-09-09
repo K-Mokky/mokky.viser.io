@@ -2,9 +2,9 @@
 // KakaoTalk Open Builder skill bridge
 // ================================================================
 // KakaoTalk chatbot channels invoke a Skill server with userRequest.utterance
-// and expect a SkillResponse JSON object (version 2.0). Viser keeps this
-// connector foreground-only and routes the reply through AssistantRuntime, so
-// model access still happens only through logged-in local CLI providers.
+// and expect a SkillResponse JSON object (version 2.0). There is no Bot API
+// push, so scheduled/job follow-ups cannot be delivered back to KakaoTalk.
+// Use ntfy/telegram from that session, or read console output on the host.
 import { timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { chunkText } from "../utils/text.js";

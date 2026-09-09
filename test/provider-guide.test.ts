@@ -61,6 +61,8 @@ test("providerGuideReport shows install, smoke, and skipped probe guidance", asy
   assert.match(report, /installed: yes/);
   assert.match(report, /manual smoke test:/);
   assert.match(report, /probe: skipped/i);
+  assert.match(report, /viser service install/);
+  assert.match(report, /ssh -N -L/);
 });
 
 test("providerGuideReport can probe a configured provider", async () => {

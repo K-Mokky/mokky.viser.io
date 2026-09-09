@@ -1,206 +1,95 @@
 // ================================================================
 // Scheduled task notification sink
 // ================================================================
-// Scheduler delivery is best-effort. If a task comes from Telegram/Discord/Slack/Matrix/Signal/iMessage/WhatsApp/LINE/Google Chat/generic Webhook/Home Assistant/Teams/Mattermost/Synology Chat/Rocket.Chat/Feishu/DingTalk/WeCom/Zalo/IRC/Nextcloud Talk/Webex/Zulip/Email/GitHub/Todoist/Notion and
-// credentials are available, Viser sends the result back to that surface.
-// Otherwise it falls back to console output.
+// Scheduler/job delivery is best-effort. Push-capable surfaces get results when
+// credentials exist and the target is already paired/allowlisted. KakaoTalk Skill
+// is request/response only, so follow-ups stay on console (or a configured ntfy/telegram fallback).
 
 import { sendDiscordMessage } from "./discord.ts";
 import { sendDingTalkMessage, type DingTalkFetchOptions } from "./dingtalk.ts";
-import { hasEmailRecipient, sendEmailMessage, type EmailRunOptions } from "./email.ts";
+import { sendEmailMessage, type EmailRunOptions } from "./email.ts";
 import { sendFeishuMessage, type FeishuFetchOptions } from "./feishu.ts";
-import { hasGenericWebhook, sendGenericWebhookMessage, type GenericWebhookFetchOptions } from "./generic-webhook.ts";
-import { hasGitHubCredentials, sendGitHubIssueComment, type GitHubFetchOptions } from "./github.ts";
+import { sendGenericWebhookMessage, type GenericWebhookFetchOptions } from "./generic-webhook.ts";
+import { sendGitHubIssueComment, type GitHubFetchOptions } from "./github.ts";
 import { sendGoogleChatMessage, type GoogleChatFetchOptions } from "./google-chat.ts";
-import { callHomeAssistantService, hasHomeAssistantCredentials, hasHomeAssistantService, type HomeAssistantFetchOptions } from "./home-assistant.ts";
+import { callHomeAssistantService, type HomeAssistantFetchOptions } from "./home-assistant.ts";
 import { sendImessageMessage, type ImessageRunOptions } from "./imessage.ts";
 import { sendLinePushMessage, type LineFetchOptions } from "./line.ts";
-import { hasIrcChannel, sendIrcMessage, type IrcRunOptions } from "./irc.ts";
+import { sendIrcMessage, type IrcRunOptions } from "./irc.ts";
 import { sendMattermostMessage, type MattermostFetchOptions } from "./mattermost.ts";
 import { sendMatrixMessage } from "./matrix.ts";
-import { hasNextcloudTalkRoom, sendNextcloudTalkMessage, type NextcloudTalkFetchOptions } from "./nextcloud-talk.ts";
-import { hasNtfyTopic, sendNtfyMessage, type NtfyFetchOptions } from "./ntfy.ts";
-import { hasMastodonTarget, sendMastodonStatus, type MastodonFetchOptions } from "./mastodon.ts";
-import { hasTodoistCredentials, sendTodoistTask, type TodoistFetchOptions } from "./todoist.ts";
-import { appendNotionPageMessage, hasNotionCredentials, type NotionFetchOptions } from "./notion.ts";
-import { appendObsidianNoteMessage, hasObsidianNoteTarget } from "./obsidian.ts";
+import { sendNextcloudTalkMessage, type NextcloudTalkFetchOptions } from "./nextcloud-talk.ts";
+import { sendNtfyMessage, type NtfyFetchOptions } from "./ntfy.ts";
+import { sendMastodonStatus, type MastodonFetchOptions } from "./mastodon.ts";
+import { sendTodoistTask, type TodoistFetchOptions } from "./todoist.ts";
+import { appendNotionPageMessage, type NotionFetchOptions } from "./notion.ts";
+import { appendObsidianNoteMessage } from "./obsidian.ts";
 import { sendRocketChatMessage, type RocketChatFetchOptions } from "./rocket-chat.ts";
 import { sendSignalMessage } from "./signal.ts";
 import { sendSlackMessage } from "./slack.ts";
 import { sendSynologyChatMessage, type SynologyChatFetchOptions } from "./synology-chat.ts";
 import { sendTeamsMessage, type TeamsFetchOptions } from "./teams.ts";
-import { hasTwitchChannel, sendTwitchMessage, type TwitchRunOptions } from "./twitch.ts";
+import { sendTwitchMessage, type TwitchRunOptions } from "./twitch.ts";
 import { sendWeComMessage, type WeComFetchOptions } from "./wecom.ts";
 import { sendWebexMessage, type WebexFetchOptions } from "./webex.ts";
 import { sendTelegramMessage } from "./telegram.ts";
 import { sendWhatsappMessage, type WhatsappFetchOptions } from "./whatsapp.ts";
-import { hasZaloRecipient, sendZaloMessage, type ZaloFetchOptions } from "./zalo.ts";
+import { sendZaloMessage, type ZaloFetchOptions } from "./zalo.ts";
 import { sendZulipMessage, type ZulipFetchOptions } from "./zulip.ts";
 import { AccessStore } from "../core/access.ts";
 import type { ConnectorMessageProposal } from "../core/actions.ts";
-import type { ScheduledTask, ViserConfig } from "../core/types.ts";
+import type { QueuedJob, ScheduledTask, ViserConfig } from "../core/types.ts";
 import type { SchedulerNotifier } from "../core/scheduler.ts";
 import type { SignalRunOptions } from "./signal.ts";
+import { deliveryForSession } from "../core/delivery.ts";
+import type { JobProgressNotifier, JobProgressStatus } from "../core/jobs.ts";
 
 export function createConnectorNotifier(config: ViserConfig): SchedulerNotifier {
+  const deliver = createDeliverySink(config);
   return async (task: ScheduledTask, output: string): Promise<void> => {
-    if (task.delivery.kind === "telegram" && task.delivery.targetId && config.connectors.telegram.botToken) {
-      await sendTelegramMessage(config.connectors.telegram.botToken, task.delivery.targetId, output);
-      return;
-    }
-
-    if (task.delivery.kind === "discord" && task.delivery.targetId && config.connectors.discord.botToken) {
-      await sendDiscordMessage(config.connectors.discord.botToken, task.delivery.targetId, output);
-      return;
-    }
-
-    if (task.delivery.kind === "slack" && task.delivery.targetId && config.connectors.slack.botToken) {
-      await sendSlackMessage(config.connectors.slack.botToken, task.delivery.targetId, output);
-      return;
-    }
-
-    if (task.delivery.kind === "matrix" && task.delivery.targetId && config.connectors.matrix.accessToken && config.connectors.matrix.homeserverUrl) {
-      await sendMatrixMessage(config.connectors.matrix.accessToken, config.connectors.matrix, task.delivery.targetId, output);
-      return;
-    }
-
-    if (task.delivery.kind === "signal" && task.delivery.targetId && config.connectors.signal.account) {
-      await sendSignalMessage(config.connectors.signal, task.delivery.targetId, output);
-      return;
-    }
-
-    if (task.delivery.kind === "imessage" && task.delivery.targetId) {
-      await sendImessageMessage(config.connectors.imessage, task.delivery.targetId, output);
-      return;
-    }
-
-    if (task.delivery.kind === "whatsapp" && task.delivery.targetId && config.connectors.whatsapp.accessToken && config.connectors.whatsapp.phoneNumberId) {
-      await sendWhatsappMessage(config.connectors.whatsapp, task.delivery.targetId, output);
-      return;
-    }
-
-    if (task.delivery.kind === "line" && task.delivery.targetId && config.connectors.line.channelAccessToken) {
-      await sendLinePushMessage(config.connectors.line, task.delivery.targetId, output);
-      return;
-    }
-
-    if (task.delivery.kind === "google-chat" && task.delivery.targetId && hasWebhook(config.connectors.googleChat)) {
-      await sendGoogleChatMessage(config.connectors.googleChat, task.delivery.targetId, output);
-      return;
-    }
-
-    if (task.delivery.kind === "webhook" && task.delivery.targetId && hasGenericWebhook(config.connectors.webhook)) {
-      await sendGenericWebhookMessage(config.connectors.webhook, task.delivery.targetId, output);
-      return;
-    }
-
-    if (task.delivery.kind === "home-assistant" && task.delivery.targetId && hasHomeAssistantCredentials(config.connectors.homeAssistant) && hasHomeAssistantService(config.connectors.homeAssistant)) {
-      await callHomeAssistantService(config.connectors.homeAssistant, task.delivery.targetId, output);
-      return;
-    }
-
-    if (task.delivery.kind === "teams" && task.delivery.targetId && hasWebhook(config.connectors.teams)) {
-      await sendTeamsMessage(config.connectors.teams, task.delivery.targetId, output);
-      return;
-    }
-
-    if (task.delivery.kind === "mattermost" && task.delivery.targetId && hasWebhook(config.connectors.mattermost)) {
-      await sendMattermostMessage(config.connectors.mattermost, task.delivery.targetId, output);
-      return;
-    }
-
-    if (task.delivery.kind === "synology-chat" && task.delivery.targetId && hasWebhook(config.connectors.synologyChat)) {
-      await sendSynologyChatMessage(config.connectors.synologyChat, task.delivery.targetId, output);
-      return;
-    }
-
-    if (task.delivery.kind === "rocket-chat" && task.delivery.targetId && hasWebhook(config.connectors.rocketChat)) {
-      await sendRocketChatMessage(config.connectors.rocketChat, task.delivery.targetId, output);
-      return;
-    }
-
-    if (task.delivery.kind === "feishu" && task.delivery.targetId && hasWebhook(config.connectors.feishu)) {
-      await sendFeishuMessage(config.connectors.feishu, task.delivery.targetId, output);
-      return;
-    }
-
-    if (task.delivery.kind === "dingtalk" && task.delivery.targetId && hasWebhook(config.connectors.dingtalk)) {
-      await sendDingTalkMessage(config.connectors.dingtalk, task.delivery.targetId, output);
-      return;
-    }
-
-    if (task.delivery.kind === "wecom" && task.delivery.targetId && hasWebhook(config.connectors.wecom)) {
-      await sendWeComMessage(config.connectors.wecom, task.delivery.targetId, output);
-      return;
-    }
-
-    if (task.delivery.kind === "zalo" && task.delivery.targetId && config.connectors.zalo.accessToken && hasZaloRecipient(config.connectors.zalo)) {
-      await sendZaloMessage(config.connectors.zalo, task.delivery.targetId, output);
-      return;
-    }
-
-    if (task.delivery.kind === "irc" && task.delivery.targetId && config.connectors.irc.host && config.connectors.irc.nick && hasIrcChannel(config.connectors.irc)) {
-      await sendIrcMessage(config.connectors.irc, task.delivery.targetId, output);
-      return;
-    }
-
-    if (task.delivery.kind === "twitch" && task.delivery.targetId && config.connectors.twitch.accessToken && config.connectors.twitch.botUsername && hasTwitchChannel(config.connectors.twitch)) {
-      await sendTwitchMessage(config.connectors.twitch, task.delivery.targetId, output);
-      return;
-    }
-
-    if (task.delivery.kind === "ntfy" && task.delivery.targetId && hasNtfyTopic(config.connectors.ntfy)) {
-      await sendNtfyMessage(config.connectors.ntfy, task.delivery.targetId, output);
-      return;
-    }
-
-    if (task.delivery.kind === "mastodon" && task.delivery.targetId && hasMastodonTarget(config.connectors.mastodon)) {
-      await sendMastodonStatus(config.connectors.mastodon, task.delivery.targetId, output);
-      return;
-    }
-
-    if (task.delivery.kind === "nextcloud-talk" && task.delivery.targetId && hasNextcloudTalkCredentials(config.connectors.nextcloudTalk)) {
-      await sendNextcloudTalkMessage(config.connectors.nextcloudTalk, task.delivery.targetId, output);
-      return;
-    }
-
-    if (task.delivery.kind === "webex" && task.delivery.targetId && config.connectors.webex.accessToken) {
-      await sendWebexMessage(config.connectors.webex, task.delivery.targetId, output);
-      return;
-    }
-
-    if (task.delivery.kind === "zulip" && task.delivery.targetId && hasZulipCredentials(config.connectors.zulip)) {
-      await sendZulipMessage(config.connectors.zulip, task.delivery.targetId, output);
-      return;
-    }
-
-    if (task.delivery.kind === "email" && task.delivery.targetId && config.connectors.email.from && hasEmailRecipient(config.connectors.email)) {
-      await sendEmailMessage(config.connectors.email, task.delivery.targetId, output);
-      return;
-    }
-
-    if (task.delivery.kind === "github" && task.delivery.targetId && hasGitHubCredentials(config.connectors.github)) {
-      await sendGitHubIssueComment(config.connectors.github, task.delivery.targetId, output);
-      return;
-    }
-
-    if (task.delivery.kind === "todoist" && task.delivery.targetId && hasTodoistCredentials(config.connectors.todoist)) {
-      await sendTodoistTask(config.connectors.todoist, task.delivery.targetId, output);
-      return;
-    }
-
-    if (task.delivery.kind === "notion" && task.delivery.targetId && hasNotionCredentials(config.connectors.notion)) {
-      await appendNotionPageMessage(config.connectors.notion, task.delivery.targetId, output);
-      return;
-    }
-
-    if (task.delivery.kind === "obsidian" && task.delivery.targetId && hasObsidianNoteTarget(config.connectors.obsidian)) {
-      await appendObsidianNoteMessage(config.connectors.obsidian, task.delivery.targetId, output);
-      return;
-    }
-
-    console.log(`\n[scheduled:${task.id}] ${task.prompt}\n${output}\n`);
+    await deliver(task.delivery, output, `scheduled:${task.id}`, task.prompt);
   };
+}
+
+export function createJobProgressNotifier(config: ViserConfig): JobProgressNotifier {
+  const deliver = createDeliverySink(config);
+  return async (job: QueuedJob, status: JobProgressStatus, output?: string): Promise<void> => {
+    const delivery = job.delivery ?? deliveryForSession(job.sessionId);
+    await deliver(delivery, formatJobProgressMessage(job, status, output), `job:${job.id}`, job.prompt);
+  };
+}
+
+function createDeliverySink(config: ViserConfig): (delivery: ScheduledTask["delivery"], output: string, label: string, prompt: string) => Promise<void> {
+  const send = createConnectorMessageSender(config);
+  return async (delivery, output, label, prompt) => {
+    if (delivery.kind === "kakaotalk") {
+      console.log([
+        "KakaoTalk Skill is request/response and cannot push scheduled or job follow-ups.",
+        "Use ntfy/telegram from that KakaoTalk session, or read console output on the Viser host.",
+        `\n[${label}] ${prompt}\n${output}\n`
+      ].join("\n"));
+      return;
+    }
+
+    if (delivery.kind !== "console" && delivery.targetId) {
+      try {
+        await send({ connector: delivery.kind, targetId: delivery.targetId, text: output });
+        return;
+      } catch (error) {
+        console.error(`${label} notify failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
+    console.log(`\n[${label}] ${prompt}\n${output}\n`);
+  };
+}
+
+function formatJobProgressMessage(job: QueuedJob, status: JobProgressStatus, output?: string): string {
+  const preview = job.prompt.replace(/\s+/gu, " ").slice(0, 160);
+  if (status === "started") return `Viser job [${job.id}] started.\n${preview}`;
+  if (status === "deferred") return `Viser job [${job.id}] deferred: provider unavailable. Retrying later.\n${preview}`;
+  if (status === "failed") return [`Viser job [${job.id}] failed.`, preview, output ?? ""].filter(Boolean).join("\n");
+  return [`Viser job [${job.id}] done.`, output ?? ""].filter(Boolean).join("\n");
 }
 
 export interface ConnectorMessageSenderOptions {
@@ -525,17 +414,6 @@ export function createConnectorMessageSender(config: ViserConfig, options: Conne
   };
 }
 
-function hasWebhook(config: { webhookUrl?: string; webhookUrls: Record<string, string> }): boolean {
-  return Boolean(config.webhookUrl || Object.keys(config.webhookUrls).length > 0);
-}
-
-function hasZulipCredentials(config: { siteUrl?: string; botEmail?: string; apiKey?: string }): boolean {
-  return Boolean(config.siteUrl && config.botEmail && config.apiKey);
-}
-
-function hasNextcloudTalkCredentials(config: { baseUrl?: string; username?: string; appPassword?: string; roomToken?: string; rooms: Record<string, string> }): boolean {
-  return Boolean(config.baseUrl && config.username && config.appPassword && hasNextcloudTalkRoom(config));
-}
 
 async function assertConnectorTargetAllowed(
   access: AccessStore,

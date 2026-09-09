@@ -14,6 +14,7 @@ import { chunkText } from "../utils/text.ts";
 import { connectorInputLimitMessage, connectorInputTooLong } from "./input-policy.ts";
 import { ConnectorRateLimiter, connectorRateLimitMessage } from "./rate-limit.ts";
 import { pairedMessage, pairingRequiredMessage } from "./telegram.ts";
+import { runInboundAssistantTurn } from "./progress.ts";
 import type { AssistantRuntime } from "../core/assistant.ts";
 import type { LineConnectorConfig } from "../core/types.ts";
 
@@ -204,13 +205,12 @@ export async function handleLineMessage(
     return;
   }
 
-  try {
-    const answer = await assistant.handle(normalized, `line:${peerId}`, { source: "line" });
-    await sendLineResponse(config, peerId, message.replyToken, answer, options);
-  } catch (error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    await sendLineResponse(config, peerId, message.replyToken, `Viser error:\n${detail}`, options);
-  }
+  const text = normalized;
+  await runInboundAssistantTurn(
+    (chunk) => sendLinePushMessage(config, peerId, chunk, options),
+    () => assistant.handle(text, `line:${peerId}`, { source: "line" }),
+    (chunk) => sendLineResponse(config, peerId, message.replyToken, chunk, options)
+  );
 }
 
 export async function sendLinePushMessage(

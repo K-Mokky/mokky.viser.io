@@ -9,6 +9,7 @@ import { chunkText } from "../utils/text.js";
 import { pairedMessage, pairingRequiredMessage } from "./telegram.js";
 import { connectorInputLimitMessage, connectorInputTooLong } from "./input-policy.js";
 import { ConnectorRateLimiter, connectorRateLimitMessage } from "./rate-limit.js";
+import { runInboundAssistantTurn } from "./progress.js";
 const SIGNAL_CHUNK_SIZE = 1900;
 export async function runSignalBridge(config, assistant, access) {
     if (!config.account)
@@ -84,14 +85,8 @@ export async function handleSignalEnvelope(config, assistant, envelope, access, 
         await sendSignalMessage(config, sender, connectorRateLimitMessage(rate.retryAfterMs), options);
         return;
     }
-    try {
-        const answer = await assistant.handle(normalized, `signal:${sender}`, { source: "signal" });
-        await sendSignalMessage(config, sender, answer, options);
-    }
-    catch (error) {
-        const detail = error instanceof Error ? error.message : String(error);
-        await sendSignalMessage(config, sender, `Viser error:\n${detail}`, options);
-    }
+    const text = normalized;
+    await runInboundAssistantTurn((chunk) => sendSignalMessage(config, sender, chunk, options), () => assistant.handle(text, `signal:${sender}`, { source: "signal" }));
 }
 export function normalizeSignalInput(content) {
     const trimmed = content.trim();

@@ -10,7 +10,8 @@ import { randomUUID } from "node:crypto";
 import { appendPrivateFile, ensurePrivateDir, readPrivateFileIfExists, writePrivateFile } from "../utils/files.ts";
 import { nowIso } from "../utils/text.ts";
 import { isProviderFailureOutput } from "./provider-output.ts";
-import type { AssistantHandleOptions, JobsConfig, QueuedJob, QueuedJobStatus } from "./types.ts";
+import type { AssistantHandleOptions, JobsConfig, QueuedJob, QueuedJobStatus, ScheduledDelivery } from "./types.ts";
+import { deliveryForSession } from "./delivery.ts";
 
 const PROVIDER_FAILURE_BASE_BACKOFF_MS = 60_000;
 const PROVIDER_FAILURE_MAX_BACKOFF_MS = 60 * 60_000;
@@ -25,9 +26,14 @@ export interface JobRunReport {
   lines: string[];
 }
 
+export type JobProgressStatus = "started" | "done" | "failed" | "deferred";
+
+export type JobProgressNotifier = (job: QueuedJob, status: JobProgressStatus, output?: string) => Promise<void>;
+
 export interface JobRunOptions {
   concurrency?: number;
   maxInputChars?: number;
+  notifier?: JobProgressNotifier;
 }
 
 export class JobStore {
@@ -37,12 +43,13 @@ export class JobStore {
     this.dir = dir;
   }
 
-  async enqueue(input: Pick<QueuedJob, "prompt" | "sessionId" | "source" | "providerId"> & { dependsOn?: string[] }): Promise<QueuedJob> {
+  async enqueue(input: Pick<QueuedJob, "prompt" | "sessionId" | "source" | "providerId"> & { dependsOn?: string[]; delivery?: ScheduledDelivery }): Promise<QueuedJob> {
     const prompt = input.prompt.trim();
     if (!prompt) throw new Error("Job prompt is required.");
     const dependsOn = normalizeJobDependencies(input.dependsOn);
 
     const jobs = await this.list();
+    const delivery = input.delivery ?? deliveryForSession(input.sessionId);
     const job: QueuedJob = {
       id: randomUUID().slice(0, 12),
       prompt,
@@ -50,6 +57,7 @@ export class JobStore {
       source: input.source,
       providerId: input.providerId,
       ...(dependsOn.length ? { dependsOn } : {}),
+      ...(delivery.kind === "console" ? {} : { delivery }),
       status: "pending",
       attempts: 0,
       createdAt: nowIso()
@@ -339,6 +347,7 @@ export async function runQueuedJobs(
       const job = await store.start(queued.id);
       if (!job) continue;
       started.push(job);
+      await notifyJobProgress(options.notifier, job, "started");
     }
 
     if (started.length === 0) break;
@@ -365,12 +374,15 @@ export async function runQueuedJobs(
       if (outcome.status === "deferred") {
         await store.defer(outcome.job.id, outcome.output);
         lines.push(`- [${outcome.job.id}] deferred: provider unavailable`);
+        await notifyJobProgress(options.notifier, outcome.job, "deferred", outcome.output);
       } else if (outcome.status === "done") {
         await store.finish(outcome.job.id, outcome.output);
         lines.push(`- [${outcome.job.id}] done`);
+        await notifyJobProgress(options.notifier, outcome.job, "done", outcome.output);
       } else {
         await store.fail(outcome.job.id, outcome.output);
         lines.push(`- [${outcome.job.id}] failed: ${outcome.output}`);
+        await notifyJobProgress(options.notifier, outcome.job, "failed", outcome.output);
       }
     }
   }
@@ -506,4 +518,18 @@ async function mapWithConcurrency<T, R>(
   }));
 
   return results;
+}
+
+async function notifyJobProgress(
+  notifier: JobProgressNotifier | undefined,
+  job: QueuedJob,
+  status: JobProgressStatus,
+  output?: string
+): Promise<void> {
+  if (!notifier) return;
+  try {
+    await notifier(job, status, output);
+  } catch (error) {
+    console.error(`Job [${job.id}] ${status} notify failed: ${errorMessage(error)}`);
+  }
 }

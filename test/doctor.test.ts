@@ -14,5 +14,7 @@ test("doctorReport includes provider-proof verification and launch rehearsal com
   assert.match(report, /viser env-check/);
   assert.match(report, /viser gateway --dry-run --strict --live --probe-all-providers/);
   assert.match(report, /viser next-steps --live --probe-all-providers/);
+  assert.match(report, /viser service install/);
+  assert.match(report, /ssh -N -L/);
   assert.match(report, /model calls still go through local CLIs/);
 });

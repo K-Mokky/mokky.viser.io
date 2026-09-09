@@ -12,6 +12,7 @@ import { ensureLocalNpmrc, installBundledSkills } from "./setup.ts";
 import { commandExists } from "../utils/exec.ts";
 import { isNodeVersionSupported, nodeVersionLabel } from "../utils/node-version.ts";
 import { CORE_LOCAL_CLI_ROUTES } from "../core/local-cli-policy.ts";
+import { formatRemoteOperatorGuidance } from "../utils/remote-access.ts";
 import type { ViserConfig } from "../core/types.ts";
 
 export interface OnboardOptions {
@@ -77,6 +78,11 @@ export async function onboardReport(config: ViserConfig, options: OnboardOptions
   lines.push("  · 다음에 뭘 할지 안내:         node src/index.ts next-steps");
   lines.push("  · 텔레그램/디스코드로 쓰기:    node src/index.ts env-init 로 토큰을 넣어요.");
   lines.push("    (남에게 중계하면 구독 약관·계정 벤 위험이 있어요. SECURITY.md를 먼저 읽어요.)");
+  lines.push("  · SSH 서버에서 24시간 쓰기:   viser service install");
+  lines.push("    (Linux면 `loginctl enable-linger \"$USER\"` 후, 본체 브라우저에서는 SSH 터널로 127.0.0.1을 여세요.)");
+  for (const line of formatRemoteOperatorGuidance({ always: true, port: config.webDashboard.port }).split("\n")) {
+    lines.push(`    ${line}`);
+  }
 
   return lines.join("\n");
 }

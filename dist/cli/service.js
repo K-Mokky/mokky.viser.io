@@ -14,6 +14,7 @@ import { preflight } from "./preflight.js";
 import { assertNoSymlinkComponentsUnderRoot, PRIVATE_FILE_MODE, removePrivateFileIfExists, writePrivateFile } from "../utils/files.js";
 import { runCommand } from "../utils/exec.js";
 import { nowIso } from "../utils/text.js";
+import { remoteAlwaysOnServiceLines, remoteLoopbackAccessLines } from "../utils/remote-access.js";
 const REDACTED = "[REDACTED]";
 const PRIVATE_DIR_MODE = 0o700;
 const MAX_LOG_TAIL_BYTES = 1_000_000;
@@ -110,7 +111,9 @@ export async function serviceCommand(args, config) {
                 "- service trim-logs [maxBytes] [keepBytes]: trim oversized gateway stdout/stderr logs now",
                 "",
                 "The native launchd/systemd/Windows registrations run `node src/index.ts service-run --live --probe-all-providers` from this workspace.",
-                "`service-run` validates live connector tokens and executes the strict live provider-proof preflight gate before starting the gateway."
+                "`service-run` validates live connector tokens and executes the strict live provider-proof preflight gate before starting the gateway.",
+                "",
+                ...remoteAlwaysOnServiceLines({ port: config.webDashboard.port })
             ].join("\n");
     }
 }
@@ -268,7 +271,9 @@ export async function installSystemdService(config, options = {}) {
     return [
         formatServiceCommandResult("systemd daemon-reload", reload, [`Installed ${userUnit}`]),
         "",
-        formatServiceCommandResult("systemd install", enable, [`Enabled ${systemdUnitName(config)}.service`])
+        formatServiceCommandResult("systemd install", enable, [`Enabled ${systemdUnitName(config)}.service`]),
+        "",
+        ...remoteAlwaysOnServiceLines({ platform: "linux", port: config.webDashboard.port })
     ].join("\n");
 }
 export async function installSystemdUserUnit(workspaceUnit, userUnit) {
@@ -419,7 +424,8 @@ export function generateSystemdUserService(config, options = {}) {
         `WorkingDirectory=${systemdQuote(config.assistant.workdir)}`,
         ...environment.map(([key, value]) => `Environment=${systemdQuote(`${key}=${value}`)}`),
         `ExecStart=${[nodePath, scriptPath, "service-run", "--live", "--probe-all-providers"].map(systemdQuote).join(" ")}`,
-        "Restart=on-failure",
+        "Restart=always",
+        "RestartPreventExitStatus=0",
         "RestartSec=10",
         `StandardOutput=append:${systemdEscapePercent(join(logDir, "gateway.out.log"))}`,
         `StandardError=append:${systemdEscapePercent(join(logDir, "gateway.err.log"))}`,
@@ -543,7 +549,9 @@ function systemdInstallInstructions(target, config) {
         `  systemctl --user disable --now ${systemdUnitName(config)}.service`,
         "",
         "If the unit should survive logout on Linux, enable linger explicitly:",
-        "  loginctl enable-linger \"$USER\""
+        "  loginctl enable-linger \"$USER\"",
+        "",
+        ...remoteLoopbackAccessLines({ always: true, port: config.webDashboard.port })
     ].join("\n");
 }
 function windowsInstallInstructions(artifacts, config) {

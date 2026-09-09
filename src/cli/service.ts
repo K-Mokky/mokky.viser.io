@@ -15,6 +15,7 @@ import { preflight } from "./preflight.ts";
 import { assertNoSymlinkComponentsUnderRoot, PRIVATE_FILE_MODE, removePrivateFileIfExists, writePrivateFile } from "../utils/files.ts";
 import { runCommand } from "../utils/exec.ts";
 import { nowIso } from "../utils/text.ts";
+import { remoteAlwaysOnServiceLines, remoteLoopbackAccessLines } from "../utils/remote-access.ts";
 import type { ViserConfig } from "../core/types.ts";
 import type { RunCommandOptions, RunCommandResult } from "../utils/exec.ts";
 
@@ -156,7 +157,9 @@ export async function serviceCommand(args: string[], config: ViserConfig): Promi
         "- service trim-logs [maxBytes] [keepBytes]: trim oversized gateway stdout/stderr logs now",
         "",
         "The native launchd/systemd/Windows registrations run `node src/index.ts service-run --live --probe-all-providers` from this workspace.",
-        "`service-run` validates live connector tokens and executes the strict live provider-proof preflight gate before starting the gateway."
+        "`service-run` validates live connector tokens and executes the strict live provider-proof preflight gate before starting the gateway.",
+        "",
+        ...remoteAlwaysOnServiceLines({ port: config.webDashboard.port })
       ].join("\n");
   }
 }
@@ -321,7 +324,9 @@ export async function installSystemdService(config: ViserConfig, options: Servic
   return [
     formatServiceCommandResult("systemd daemon-reload", reload, [`Installed ${userUnit}`]),
     "",
-    formatServiceCommandResult("systemd install", enable, [`Enabled ${systemdUnitName(config)}.service`])
+    formatServiceCommandResult("systemd install", enable, [`Enabled ${systemdUnitName(config)}.service`]),
+    "",
+    ...remoteAlwaysOnServiceLines({ platform: "linux", port: config.webDashboard.port })
   ].join("\n");
 }
 
@@ -481,7 +486,8 @@ export function generateSystemdUserService(config: ViserConfig, options: Systemd
     `WorkingDirectory=${systemdQuote(config.assistant.workdir)}`,
     ...environment.map(([key, value]) => `Environment=${systemdQuote(`${key}=${value}`)}`),
     `ExecStart=${[nodePath, scriptPath, "service-run", "--live", "--probe-all-providers"].map(systemdQuote).join(" ")}`,
-    "Restart=on-failure",
+    "Restart=always",
+    "RestartPreventExitStatus=0",
     "RestartSec=10",
     `StandardOutput=append:${systemdEscapePercent(join(logDir, "gateway.out.log"))}`,
     `StandardError=append:${systemdEscapePercent(join(logDir, "gateway.err.log"))}`,
@@ -619,7 +625,9 @@ function systemdInstallInstructions(target: string, config: ViserConfig): string
     `  systemctl --user disable --now ${systemdUnitName(config)}.service`,
     "",
     "If the unit should survive logout on Linux, enable linger explicitly:",
-    "  loginctl enable-linger \"$USER\""
+    "  loginctl enable-linger \"$USER\"",
+    "",
+    ...remoteLoopbackAccessLines({ always: true, port: config.webDashboard.port })
   ].join("\n");
 }
 
